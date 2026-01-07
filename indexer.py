@@ -1,88 +1,111 @@
-# indexer.py - PrivCode Indexing Pipeline
+# indexer.py - PrivCode Incremental Indexing with AST Metadata (Enhanced)
 
 import os
 from git import Repo
 from pathlib import Path
-from langchain_community.document_loaders import TextLoader
+import json
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 import faiss
 from rank_bm25 import BM25Okapi
 import pickle
-import json
 from tqdm import tqdm
 
-# ---------------- TREE-SITTER (PHASE 2 - COMMENTED) ----------------
-# Tree-sitter requires native builds and vendor grammar repos.
-# We keep this code commented for future enhancement (AST-aware indexing).
-
-# import tree_sitter
-# from tree_sitter import Language, Parser
-
-# PY_PARSER = Parser()
-# JS_PARSER = Parser()
-
-# Language.build_library(
-#     'build/my-languages.so',
-#     [
-#         'vendor/tree-sitter-python',
-#         'vendor/tree-sitter-javascript'
-#     ]
-# )
-
-# LANG = Language('build/my-languages.so', 'python')
-# PY_PARSER.set_language(LANG)
-
-# def extract_functions_classes(code: str, language: str = "python") -> list:
-#     """AST-based extraction of functions and classes (Phase 2)."""
-#     try:
-#         parser = PY_PARSER if language == "python" else JS_PARSER
-#         tree = parser.parse(bytes(code, "utf8"))
-#         return []  # Placeholder for future AST logic
-#     except Exception:
-#         return []
-
-# -------------------------------------------------------------------
-
 # --------------------- CONFIG ---------------------
-REPO_PATH = "test_repo"          # Local test repo
+REPO_PATH = "test_repo"
 INDEX_DIR = "index"
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
+COMMIT_FILE = os.path.join(INDEX_DIR, "last_commit.txt")
 # --------------------------------------------------
 
 os.makedirs(INDEX_DIR, exist_ok=True)
 
+# --------------------- OPTIONAL AST (Python only) ---------------------
+AST_ENABLED = False
+
+try:
+    from tree_sitter_languages import get_parser
+    parser = get_parser("python")
+    AST_ENABLED = True
+    print("✅ Tree-sitter enabled for AST metadata extraction")
+except ImportError:
+    print("⚠️ Tree-sitter not available — AST metadata disabled (install: pip install tree-sitter-languages)")
+
+def extract_functions_classes(code: str):
+    """Extract function and class names from Python code using AST"""
+    if not AST_ENABLED:
+        return []
+    try:
+        tree = parser.parse(bytes(code, "utf-8"))
+        funcs = []
+
+        def walk(node):
+            if node.type in ("function_definition", "class_definition"):
+                name = node.child_by_field_name("name")
+                if name:
+                    funcs.append(name.text.decode("utf-8"))
+            for c in node.children:
+                walk(c)
+
+        walk(tree.root_node)
+        return funcs
+    except Exception as e:
+        return []
+
+# --------------------------------------------------
+
 # Load embedding model
-print("Loading embedding model...")
+print("🔄 Loading embedding model...")
 embedder = SentenceTransformer(EMBEDDING_MODEL)
 
-# Crawl repo and load code files
-print("Crawling repo and loading code files...")
-repo = Repo(REPO_PATH)
+# --------------------- GIT CHANGE CHECK ---------------------
+try:
+    repo = Repo(REPO_PATH)
+    current_commit = repo.head.commit.hexsha
+except Exception as e:
+    print(f"⚠️ Git repo error: {e}. Proceeding with full indexing...")
+    current_commit = "no_git"
 
-code_extensions = {".py", ".js", ".java", ".ts", ".cpp", ".c", ".go"}
+if os.path.exists(COMMIT_FILE):
+    with open(COMMIT_FILE, "r") as f:
+        last_commit = f.read().strip()
+    if last_commit == current_commit:
+        print("✅ No repo changes detected — index is up to date.")
+        exit()
+
+print("🔄 Repo changed — rebuilding index...")
+
+# --------------------- FILE CRAWLING ---------------------
 documents = []
 metadatas = []
 
+code_extensions = {".py", ".js", ".java", ".ts", ".cpp", ".c", ".go", ".jsx", ".tsx"}
+
 for root, _, files in os.walk(REPO_PATH):
+    # Skip hidden directories and common build directories
+    if any(skip in root for skip in [".git", "node_modules", "__pycache__", "venv", ".venv", "build"]):
+        continue
+    
     for file in files:
         if Path(file).suffix.lower() in code_extensions:
             file_path = Path(root) / file
             rel_path = file_path.relative_to(REPO_PATH)
 
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
+                content = file_path.read_text(encoding="utf-8")
 
-                metadata = {
+                # Extract AST metadata for Python files only
+                funcs = extract_functions_classes(content) if file_path.suffix == ".py" else []
+
+                metadata_base = {
                     "source": str(rel_path),
-                    "file_path": str(file_path),
                     "language": file_path.suffix[1:],
+                    "functions_classes": funcs
                 }
 
-                # Text chunking (language-agnostic for Day 1)
+                # Smart code-aware splitting
                 splitter = RecursiveCharacterTextSplitter(
                     chunk_size=CHUNK_SIZE,
                     chunk_overlap=CHUNK_OVERLAP,
@@ -94,39 +117,34 @@ for root, _, files in os.walk(REPO_PATH):
                 for i, chunk in enumerate(chunks):
                     documents.append(chunk)
                     metadatas.append({
-                        **metadata,
+                        **metadata_base,
                         "chunk_id": i,
                         "total_chunks": len(chunks)
                     })
 
             except Exception as e:
-                print(f"Error reading {file_path}: {e}")
+                print(f"⚠️ Skip {file_path}: {e}")
 
-print(
-    f"Loaded {len(documents)} chunks from "
-    f"{len(set(m['source'] for m in metadatas))} files"
-)
+print(f"📦 Indexed {len(documents)} chunks from {len(set(m['source'] for m in metadatas))} files")
 
-# Generate embeddings
-print("Generating embeddings...")
+# --------------------- BUILD INDEXES ---------------------
+print("🧠 Generating embeddings...")
 embeddings = embedder.encode(
     documents,
     normalize_embeddings=True,
-    show_progress_bar=True
+    show_progress_bar=True,
+    batch_size=32
 )
 
-dimension = embeddings.shape[1]
-
-# Build FAISS semantic index
-print("Building FAISS index...")
-faiss_index = faiss.IndexFlatIP(dimension)
+# FAISS vector index (semantic search)
+dim = embeddings.shape[1]
+faiss_index = faiss.IndexFlatIP(dim)
 faiss_index.add(embeddings)
 faiss.write_index(faiss_index, os.path.join(INDEX_DIR, "faiss.index"))
 
-# Build BM25 keyword index
-print("Building BM25 index...")
-tokenized_corpus = [doc.split() for doc in documents]
-bm25 = BM25Okapi(tokenized_corpus)
+# BM25 keyword index (lexical search)
+tokenized = [doc.split() for doc in documents]
+bm25 = BM25Okapi(tokenized)
 
 with open(os.path.join(INDEX_DIR, "bm25.pkl"), "wb") as f:
     pickle.dump(bm25, f)
@@ -138,7 +156,9 @@ with open(os.path.join(INDEX_DIR, "documents.json"), "w", encoding="utf-8") as f
 with open(os.path.join(INDEX_DIR, "metadatas.json"), "w", encoding="utf-8") as f:
     json.dump(metadatas, f, indent=2)
 
-print("Indexing complete! PrivCode brain is ready.")
-print(f"FAISS index saved at: {INDEX_DIR}/faiss.index")
-print(f"BM25 index saved at: {INDEX_DIR}/bm25.pkl")
-print(f"Total chunks indexed: {len(documents)}")
+# Save commit hash for incremental tracking
+with open(COMMIT_FILE, "w") as f:
+    f.write(current_commit)
+
+print("✅ Incremental indexing complete — PrivCode brain upgraded!")
+print(f"💾 Index saved to: {INDEX_DIR}/")

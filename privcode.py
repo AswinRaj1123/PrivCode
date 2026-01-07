@@ -7,6 +7,10 @@ from cryptography.fernet import Fernet
 from llama_cpp import Llama
 from sentence_transformers import SentenceTransformer
 from rank_bm25 import BM25Okapi
+from config import PRESETS, ACTIVE_PRESET
+
+# Load performance configuration
+CONFIG = PRESETS[ACTIVE_PRESET]
 
 # -----------------------------
 # Paths
@@ -68,20 +72,28 @@ bm25 = pickle.loads(
 embedder = SentenceTransformer("BAAI/bge-small-en-v1.5")
 
 # -----------------------------
-# Load Llama model
+# Load Llama model (OPTIMIZED FOR SPEED)
 # -----------------------------
+print(f"🚀 Loading model with preset: {ACTIVE_PRESET}")
 llm = Llama(
     model_path=MODEL_PATH,
-    n_ctx=4096,
-    n_threads=8,
-    n_gpu_layers=0,  # set >0 if GPU available
-    verbose=False
+    n_ctx=CONFIG["n_ctx"],
+    n_batch=CONFIG["n_batch"],
+    n_threads=CONFIG["n_threads"],
+    n_gpu_layers=CONFIG["n_gpu_layers"],
+    verbose=False,
+    use_mlock=True,      # Lock model in RAM for faster access
+    use_mmap=True        # Memory-mapped files for efficiency
 )
 
 # -----------------------------
-# Hybrid Retrieval
+# Hybrid Retrieval (Enhanced & Optimized)
 # -----------------------------
-def retrieve(query, k=5):
+def retrieve(query, k=None):
+    """Retrieve top-k relevant chunks using hybrid search"""
+    if k is None:
+        k = CONFIG["top_k"]
+    
     # Dense search (FAISS)
     q_emb = embedder.encode([query]).astype("float32")
     _, dense_ids = faiss_index.search(q_emb, k)
@@ -95,36 +107,75 @@ def retrieve(query, k=5):
         reverse=True
     )[:k]
 
-    # Merge results
+    # Merge and deduplicate results
     ids = list(dict.fromkeys(dense_ids[0].tolist() + bm25_ids))
-    return [documents[i] for i in ids[:k]]
+    
+    # Return both document chunks and their indices for metadata access
+    return [(documents[i], i) for i in ids[:k]]
 
 # -----------------------------
-# Generate Answer (RAG)
+# Generate Answer (RAG with AST Metadata) - OPTIMIZED
 # -----------------------------
 def generate_answer(query):
-    contexts = retrieve(query)
+    """Generate answer using retrieved context with function/class metadata"""
+    results = retrieve(query)
+    
+    # Build compact context
+    context_chunks = []
+    for doc, idx in results:
+        funcs_classes = metadatas[idx].get('functions_classes', [])
+        max_funcs = CONFIG.get("max_functions_shown", 3)
+        funcs_str = ', '.join(funcs_classes[:max_funcs]) if funcs_classes else 'N/A'
+        
+        # Truncate code based on config
+        max_preview = CONFIG.get("max_code_preview", 400)
+        code_preview = doc[:max_preview] + "..." if len(doc) > max_preview else doc
+        
+        chunk_info = f"""📄 {metadatas[idx]['source']}
+🔧 {funcs_str}
+{code_preview}"""
+        context_chunks.append(chunk_info)
+    
+    context_text = "\n\n".join(context_chunks)
 
-    context_text = "\n\n".join(contexts)
-
-    prompt = f"""
-You are PrivCode, a secure AI assistant.
-Answer strictly based on the provided code context.
-
-Context:
+    # Shorter, more directive prompt for faster generation
+    prompt = f"""Code context:
 {context_text}
 
-Question:
-{query}
-
-Answer:
-"""
+Q: {query}
+A:"""
 
     response = llm(
         prompt,
-        max_tokens=512,
-        temperature=0.2,
-        stop=["</s>"]
+        max_tokens=CONFIG["max_tokens"],
+        temperature=CONFIG["temperature"],
+        top_p=0.9,
+        repeat_penalty=1.1,
+        stop=["</s>", "\nQ:", "\n\n\n", "Question:"]  # Better stop sequences
     )
 
     return response["choices"][0]["text"].strip()
+
+# -----------------------------
+# CLI Interface (Optional)
+# -----------------------------
+if __name__ == "__main__":
+    print("🔒 PrivCode - Secure Local Code Assistant")
+    print("=" * 50)
+    
+    while True:
+        query = input("\n🔍 Ask a question (or 'exit' to quit): ").strip()
+        
+        if query.lower() in ['exit', 'quit', 'q']:
+            print("👋 Goodbye!")
+            break
+        
+        if not query:
+            continue
+        
+        try:
+            print("\n💡 Generating answer...\n")
+            answer = generate_answer(query)
+            print(f"📝 Answer:\n{answer}\n")
+        except Exception as e:
+            print(f"❌ Error: {e}")
