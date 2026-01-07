@@ -1,137 +1,130 @@
-# privcode.py - PrivCode Local RAG Engine
+import numpy as np
 import os
 import json
-import faiss
-import numpy as np
 import pickle
+import faiss
+from cryptography.fernet import Fernet
+from llama_cpp import Llama
 from sentence_transformers import SentenceTransformer
 from rank_bm25 import BM25Okapi
-from llama_cpp import Llama
 
-# --------------------- CONFIG ---------------------
-INDEX_DIR = "index"
-MODEL_PATH = "models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf"  # Update if different
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
-TOP_K_RETRIEVAL = 5
-MAX_CONTEXT_TOKENS = 3000  # Safe limit for 8B model
-TEMPERATURE = 0.3
-# --------------------------------------------------
+# -----------------------------
+# Paths
+# -----------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-print("Loading embedding model and indexes...")
-embedder = SentenceTransformer(EMBEDDING_MODEL)
+INDEX_DIR = os.path.join(BASE_DIR, "index")
+MODEL_PATH = os.path.join(BASE_DIR, "models", "Meta-Llama-3-8B-Instruct-Q4_K_M.gguf")
+KEY_PATH = os.path.join(BASE_DIR, "secret.key")
 
-with open(os.path.join(INDEX_DIR, "documents.json"), "r") as f:
-    documents = json.load(f)
-with open(os.path.join(INDEX_DIR, "metadatas.json"), "r") as f:
-    metadatas = json.load(f)
+# -----------------------------
+# Load encryption key
+# -----------------------------
+with open(KEY_PATH, "rb") as f:
+    key = f.read()
 
-faiss_index = faiss.read_index(os.path.join(INDEX_DIR, "faiss.index"))
-with open(os.path.join(INDEX_DIR, "bm25.pkl"), "rb") as f:
-    bm25 = pickle.load(f)
+cipher = Fernet(key)
 
-# Load quantized LLM (this takes 10-30 sec first time)
-print("Loading 4-bit Llama-3-8B (this may take a minute)...")
+# -----------------------------
+# Helper: decrypt file
+# -----------------------------
+def decrypt_file(path):
+    with open(path, "rb") as f:
+        encrypted = f.read()
+    return cipher.decrypt(encrypted)
+
+# -----------------------------
+# Load encrypted FAISS index (FIXED)
+# -----------------------------
+faiss_bytes = decrypt_file(os.path.join(INDEX_DIR, "faiss.index.enc"))
+
+# Convert bytes → numpy uint8 array (REQUIRED)
+faiss_array = np.frombuffer(faiss_bytes, dtype=np.uint8)
+
+# Deserialize correctly
+faiss_index = faiss.deserialize_index(faiss_array)
+
+# -----------------------------
+# Load encrypted documents
+# -----------------------------
+documents = json.loads(
+    decrypt_file(os.path.join(INDEX_DIR, "documents.json.enc")).decode("utf-8")
+)
+
+metadatas = json.loads(
+    decrypt_file(os.path.join(INDEX_DIR, "metadatas.json.enc")).decode("utf-8")
+)
+
+# -----------------------------
+# Load encrypted BM25
+# -----------------------------
+bm25 = pickle.loads(
+    decrypt_file(os.path.join(INDEX_DIR, "bm25.pkl.enc"))
+)
+
+# -----------------------------
+# Load embedding model
+# -----------------------------
+embedder = SentenceTransformer("BAAI/bge-small-en-v1.5")
+
+# -----------------------------
+# Load Llama model
+# -----------------------------
 llm = Llama(
     model_path=MODEL_PATH,
-    n_ctx=4096,          # Context window
-    n_threads=8,         # Adjust to your CPU
-    n_gpu_layers=35 if os.getenv("USE_GPU") else 0,  # Set USE_GPU=1 if you have CUDA
+    n_ctx=4096,
+    n_threads=8,
+    n_gpu_layers=0,  # set >0 if GPU available
     verbose=False
 )
 
-print("PrivCode is ALIVE! 🚀")
+# -----------------------------
+# Hybrid Retrieval
+# -----------------------------
+def retrieve(query, k=5):
+    # Dense search (FAISS)
+    q_emb = embedder.encode([query]).astype("float32")
+    _, dense_ids = faiss_index.search(q_emb, k)
 
-def hybrid_retrieval(query: str, top_k: int = TOP_K_RETRIEVAL):
-    # Same hybrid logic from retriever.py (reciprocal rank fusion)
-    query_emb = embedder.encode([query], normalize_embeddings=True)
-    D_sem, I_sem = faiss_index.search(query_emb, top_k * 2)
-    semantic_indices = I_sem[0]
-
+    # BM25 search
     tokenized_query = query.split()
     bm25_scores = bm25.get_scores(tokenized_query)
-    bm25_top_indices = np.argsort(bm25_scores)[::-1][:top_k * 2]
+    bm25_ids = sorted(
+        range(len(bm25_scores)),
+        key=lambda i: bm25_scores[i],
+        reverse=True
+    )[:k]
 
-    fused_scores = np.zeros(len(documents))
-    alpha = 0.5
-    for rank, idx in enumerate(semantic_indices):
-        fused_scores[idx] += (1 - alpha) * (1 / (rank + 60))
-    for rank, idx in enumerate(bm25_top_indices):
-        fused_scores[idx] += alpha * (1 / (rank + 60))
+    # Merge results
+    ids = list(dict.fromkeys(dense_ids[0].tolist() + bm25_ids))
+    return [documents[i] for i in ids[:k]]
 
-    final_indices = np.argsort(fused_scores)[::-1][:top_k]
-    context_chunks = []
-    sources = []
-    for idx in final_indices:
-        if fused_scores[idx] > 0:
-            context_chunks.append(documents[idx])
-            sources.append(metadatas[idx]["source"])
-    return "\n\n".join(context_chunks), list(set(sources))
+# -----------------------------
+# Generate Answer (RAG)
+# -----------------------------
+def generate_answer(query):
+    contexts = retrieve(query)
 
-def generate_answer(query: str):
-    context, sources = hybrid_retrieval(query)
-    
-    system_prompt = """You are PrivCode, an expert code analyst for a private codebase.
-Answer ONLY based on the provided context. Be precise, technical, and helpful.
-Output strictly in JSON format with these keys:
-{
-  "answer": "your explanation",
-  "sources": ["list of file paths"],
-  "potential_issues": ["list of bugs/performance issues if any, else empty"],
-  "suggestions": ["list of improvements, else empty"]
-}"""
+    context_text = "\n\n".join(contexts)
 
-    user_prompt = f"""Context from codebase:
-{context}
+    prompt = f"""
+You are PrivCode, a secure AI assistant.
+Answer strictly based on the provided code context.
 
-Question: {query}
+Context:
+{context_text}
 
-Respond in valid JSON only. No extra text."""
+Question:
+{query}
+
+Answer:
+"""
 
     response = llm(
-        f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n{system_prompt}<|eot_id|>"
-        f"<|start_header_id|>user<|end_header_id|>\n{user_prompt}<|eot_id|>"
-        f"<|start_header_id|>assistant<|end_header_id|>",
-        max_tokens=1024,
-        temperature=TEMPERATURE,
-        stop=["<|eot_id|>"],
-        echo=False
+        prompt,
+        max_tokens=512,
+        temperature=0.2,
+        stop=["</s>"]
     )
-    
-    raw_output = response["choices"][0]["text"].strip()
-    
-    # Basic cleanup in case JSON is malformed
-    try:
-        return json.loads(raw_output)
-    except:
-        return {
-            "answer": raw_output,
-            "sources": sources,
-            "potential_issues": [],
-            "suggestions": [],
-            "note": "Raw output (JSON parse failed)"
-        }
 
-# Interactive loop
-if __name__ == "__main__":
-    print("\n" + "="*70)
-    print("PrivCode Ready — Ask anything about your codebase!")
-    print("="*70)
-    while True:
-        query = input("\n🔍 Your question: ").strip()
-        if query.lower() in ["exit", "q", "quit"]:
-            print("Great work today, bro! See you on Day 4 for UI + security. 🚀")
-            break
-        if not query:
-            continue
-        
-        print("\nThinking...\n")
-        result = generate_answer(query)
-        
-        print("Answer:")
-        print(result.get("answer", "No answer generated"))
-        print("\nSources:", ", ".join(result.get("sources", [])))
-        if result.get("potential_issues"):
-            print("\nPotential Issues:", "\n- " + "\n- ".join(result["potential_issues"]))
-        if result.get("suggestions"):
-            print("\nSuggestions:", "\n- " + "\n- ".join(result["suggestions"]))
-        print("\n" + "-"*70)
+    return response["choices"][0]["text"].strip()
