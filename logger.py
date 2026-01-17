@@ -1,16 +1,29 @@
+# logger.py - Centralized logger for PrivCode
+
 import logging
-from logger import setup_logger
-logger = setup_logger()
+import sys
 
-LOG_FILE = "privcode.log"
+def setup_logger(name="PrivCode", log_file="privcode.log"):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
 
-def setup_logger():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.FileHandler(LOG_FILE),
-            logging.StreamHandler()
-        ]
+    if logger.handlers:
+        return logger
+
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(message)s"
     )
-    return logging.getLogger("privcode")
+
+    # Console handler (UTF-8 safe)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+
+    # File handler (always UTF-8)
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
+    return logger

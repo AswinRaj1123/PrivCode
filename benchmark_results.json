@@ -1,0 +1,71 @@
+{
+  "index_time_sec": 0.06,
+  "summary": {
+    "total_queries": 10,
+    "successful": 10,
+    "total_query_time_sec": 377.21,
+    "avg_response_time_sec": 37.72
+  },
+  "results": [
+    {
+      "query": "Find security vulnerabilities in auth.py",
+      "time": "37.25s",
+      "answer_length": 758,
+      "quality": "\u2705 Good"
+    },
+    {
+      "query": "Explain database connection flow",
+      "time": "40.74s",
+      "answer_length": 706,
+      "quality": "\u2705 Good"
+    },
+    {
+      "query": "Detect potential memory leaks",
+      "time": "38.77s",
+      "answer_length": 733,
+      "quality": "\u2705 Good"
+    },
+    {
+      "query": "Refactor API class for better design",
+      "time": "41.94s",
+      "answer_length": 792,
+      "quality": "\u2705 Good"
+    },
+    {
+      "query": "Find race conditions in concurrent code",
+      "time": "42.37s",
+      "answer_length": 765,
+      "quality": "\u2705 Good"
+    },
+    {
+      "query": "Show authentication and authorization logic",
+      "time": "38.23s",
+      "answer_length": 706,
+      "quality": "\u2705 Good"
+    },
+    {
+      "query": "Explain error handling strategy",
+      "time": "39.45s",
+      "answer_length": 806,
+      "quality": "\u2705 Good"
+    },
+    {
+      "query": "Locate inefficient loops or performance bottlenecks",
+      "time": "36.20s",
+      "answer_length": 779,
+      "quality": "\u2705 Good"
+    },
+    {
+      "query": "Identify unused or dead code",
+      "time": "16.87s",
+      "answer_length": 211,
+      "quality": "\u2705 Good"
+    },
+    {
+      "query": "Explain how configuration is loaded and used",
+      "time": "45.41s",
+      "answer_length": 829,
+      "quality": "\u2705 Good"
+    }
+  ]
+}
