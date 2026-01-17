@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PrivCode AI Agent</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #e2e8f0;
+        }
+        
+        .installer-window {
+            width: 100%;
+            max-width: 600px;
+            height: 100vh;
+            max-height: 700px;
+            background: #1e293b;
+            border-radius: 12px;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            text-align: center;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 5px;
+            letter-spacing: -0.5px;
+        }
+        
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+            font-weight: 400;
+        }
+        
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 30px;
+        }
+        
+        .status-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 14px;
+            background: rgba(30, 41, 59, 0.5);
+            border-radius: 8px;
+            border-left: 3px solid #667eea;
+            transition: all 0.3s ease;
+        }
+        
+        .status-item.completed {
+            border-left-color: #10b981;
+            background: rgba(16, 185, 129, 0.1);
+        }
+        
+        .status-item.error {
+            border-left-color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+        
+        .status-icon {
+            min-width: 24px;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            margin-top: 2px;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(102, 126, 234, 0.3);
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .checkmark {
+            color: #10b981;
+            font-weight: bold;
+        }
+        
+        .error-mark {
+            color: #ef4444;
+            font-weight: bold;
+        }
+        
+        .status-content {
+            flex: 1;
+        }
+        
+        .status-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #e2e8f0;
+            margin-bottom: 4px;
+        }
+        
+        .status-message {
+            font-size: 12px;
+            color: #94a3b8;
+            line-height: 1.4;
+        }
+        
+        .status-message.success {
+            color: #10b981;
+        }
+        
+        .status-message.error {
+            color: #ef4444;
+        }
+        
+        .footer {
+            padding: 20px 30px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(15, 23, 42, 0.5);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .overall-status {
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        
+        .overall-status.ready {
+            color: #10b981;
+            font-weight: 600;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 3px;
+            background: rgba(102, 126, 234, 0.2);
+            border-radius: 2px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+
+        .dot-pulse {
+            display: inline-block;
+        }
+
+        .dot-pulse::after {
+            content: '.';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60% { content: '...'; }
+            100% { content: ''; }
+        }
+    </style>
+</head>
+<body>
+    <div class="installer-window">
+        <div class="header">
+            <h1>🔐 PrivCode</h1>
+            <p>Initializing AI Agent...</p>
+        </div>
+
+        <div class="content">
+            <div class="status-list" id="statusList">
+                <div class="status-item" id="ollama-item">
+                    <div class="status-icon">
+                        <div class="spinner"></div>
+                    </div>
+                    <div class="status-content">
+                        <div class="status-title">Checking Ollama</div>
+                        <div class="status-message">Detecting local LLM runtime<span class="dot-pulse"></span></div>
+                    </div>
+                </div>
+
+                <div class="status-item" id="backend-item">
+                    <div class="status-icon">
+                        <div class="spinner"></div>
+                    </div>
+                    <div class="status-content">
+                        <div class="status-title">Starting FastAPI Backend</div>
+                        <div class="status-message">Booting AI brain<span class="dot-pulse"></span></div>
+                    </div>
+                </div>
+
+                <div class="status-item" id="embeddings-item">
+                    <div class="status-icon">
+                        <div class="spinner"></div>
+                    </div>
+                    <div class="status-content">
+                        <div class="status-title">Loading Embeddings Model</div>
+                        <div class="status-message">BAAI/bge-small-en-v1.5<span class="dot-pulse"></span></div>
+                    </div>
+                </div>
+
+                <div class="status-item" id="llm-item">
+                    <div class="status-icon">
+                        <div class="spinner"></div>
+                    </div>
+                    <div class="status-content">
+                        <div class="status-title">Loading LLM Model</div>
+                        <div class="status-message">Llama-3-8B<span class="dot-pulse"></span></div>
+                    </div>
+                </div>
+
+                <div class="status-item" id="index-item">
+                    <div class="status-icon">
+                        <div class="spinner"></div>
+                    </div>
+                    <div class="status-content">
+                        <div class="status-title">Loading Search Index</div>
+                        <div class="status-message">FAISS + BM25 (encrypted)<span class="dot-pulse"></span></div>
+                    </div>
+                </div>
+
+                <div class="status-item" id="ast-item">
+                    <div class="status-icon">
+                        <div class="spinner"></div>
+                    </div>
+                    <div class="status-content">
+                        <div class="status-title">Initializing AST Parser</div>
+                        <div class="status-message">Tree-sitter for code analysis<span class="dot-pulse"></span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <div class="overall-status" id="overallStatus">Initializing...</div>
+        </div>
+    </div>
+
+    <script>
+        const statusItems = {
+            'ollama-item': { title: 'Ollama', completed: false },
+            'backend-item': { title: 'FastAPI Backend', completed: false },
+            'embeddings-item': { title: 'Embeddings', completed: false },
+            'llm-item': { title: 'LLM Model', completed: false },
+            'index-item': { title: 'Search Index', completed: false },
+            'ast-item': { title: 'AST Parser', completed: false },
+        };
+
+        function markComplete(itemId, message = '') {
+            const item = document.getElementById(itemId);
+            if (!item) return;
+
+            item.classList.add('completed');
+            item.classList.remove('error');
+            
+            const icon = item.querySelector('.status-icon');
+            icon.innerHTML = '<span class="checkmark">✓</span>';
+            
+            const messageEl = item.querySelector('.status-message');
+            if (message) {
+                messageEl.textContent = message;
+                messageEl.classList.add('success');
+            } else {
+                messageEl.classList.remove('dot-pulse');
+            }
+            
+            statusItems[itemId].completed = true;
+            updateProgress();
+        }
+
+        function markError(itemId, message = '') {
+            const item = document.getElementById(itemId);
+            if (!item) return;
+
+            item.classList.add('error');
+            item.classList.remove('completed');
+            
+            const icon = item.querySelector('.status-icon');
+            icon.innerHTML = '<span class="error-mark">✕</span>';
+            
+            const messageEl = item.querySelector('.status-message');
+            if (message) {
+                messageEl.textContent = message;
+                messageEl.classList.add('error');
+            }
+        }
+
+        function updateProgress() {
+            const completed = Object.values(statusItems).filter(item => item.completed).length;
+            const total = Object.keys(statusItems).length;
+            const percentage = (completed / total) * 100;
+            
+            document.getElementById('progressFill').style.width = percentage + '%';
+
+            if (percentage === 100) {
+                document.getElementById('overallStatus').textContent = '✓ Ready';
+                document.getElementById('overallStatus').classList.add('ready');
+                document.querySelector('.header p').textContent = 'AI Agent Ready for Queries';
+            }
+        }
+
+        // Simulate status updates (in production, poll FastAPI for real status)
+        function simulateInitialization() {
+            setTimeout(() => markComplete('ollama-item', '✓ Ollama detected'), 500);
+            setTimeout(() => markComplete('backend-item', '✓ FastAPI running on localhost:8000'), 2000);
+            setTimeout(() => markComplete('embeddings-item', '✓ SentenceTransformer loaded'), 4000);
+            setTimeout(() => markComplete('llm-item', '✓ Llama-3-8B ready'), 6000);
+            setTimeout(() => markComplete('index-item', '✓ Index decrypted'), 7500);
+            setTimeout(() => markComplete('ast-item', '✓ Tree-sitter active'), 8500);
+        }
+
+        // Start initialization
+        simulateInitialization();
+
+        // Optional: Poll FastAPI endpoint for real status
+        // Uncomment this when backend is ready to provide status endpoint
+        /*
+        async function pollBackendStatus() {
+            try {
+                const response = await fetch('http://localhost:8000/api/status');
+                const status = await response.json();
+                
+                if (status.ollama) markComplete('ollama-item', '✓ Ollama ready');
+                if (status.embeddings) markComplete('embeddings-item', '✓ Embeddings loaded');
+                if (status.llm) markComplete('llm-item', '✓ LLM ready');
+                if (status.index) markComplete('index-item', '✓ Index loaded');
+                if (status.ast) markComplete('ast-item', '✓ AST parser ready');
+            } catch (e) {
+                console.log('Backend not ready yet');
+            }
+        }
+
+        setInterval(pollBackendStatus, 1000);
+        */
+    </script>
+</body>
+</html>
+
