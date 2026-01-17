@@ -2,6 +2,8 @@
 import time
 import json
 from privcode import generate_answer
+from logger import setup_logger
+logger = setup_logger()
 
 # Sample test queries (customize based on your test_repo content)
 test_queries = [

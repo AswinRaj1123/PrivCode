@@ -5,6 +5,8 @@ import os
 from datetime import datetime
 from cryptography.fernet import Fernet
 from privcode import generate_answer
+from logger import setup_logger
+logger = setup_logger()
 
 # --------------------- SECURITY SETUP ---------------------
 ENCRYPT_KEY_FILE = "secret.key"

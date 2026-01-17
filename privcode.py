@@ -3,13 +3,25 @@ import os
 import json
 import pickle
 import faiss
+import logging
 from cryptography.fernet import Fernet
 from llama_cpp import Llama
 from sentence_transformers import SentenceTransformer
 from rank_bm25 import BM25Okapi
 from config import PRESETS, ACTIVE_PRESET
 
+# -----------------------------
+# Logging
+# -----------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+logger = logging.getLogger("PrivCode")
+
+# -----------------------------
 # Load performance configuration
+# -----------------------------
 CONFIG = PRESETS[ACTIVE_PRESET]
 
 # -----------------------------
@@ -38,18 +50,14 @@ def decrypt_file(path):
     return cipher.decrypt(encrypted)
 
 # -----------------------------
-# Load encrypted FAISS index (FIXED)
+# Load encrypted FAISS index
 # -----------------------------
 faiss_bytes = decrypt_file(os.path.join(INDEX_DIR, "faiss.index.enc"))
-
-# Convert bytes → numpy uint8 array (REQUIRED)
 faiss_array = np.frombuffer(faiss_bytes, dtype=np.uint8)
-
-# Deserialize correctly
 faiss_index = faiss.deserialize_index(faiss_array)
 
 # -----------------------------
-# Load encrypted documents
+# Load encrypted documents & metadata
 # -----------------------------
 documents = json.loads(
     decrypt_file(os.path.join(INDEX_DIR, "documents.json.enc")).decode("utf-8")
@@ -72,28 +80,45 @@ bm25 = pickle.loads(
 embedder = SentenceTransformer("BAAI/bge-small-en-v1.5")
 
 # -----------------------------
-# Load Llama model (OPTIMIZED FOR SPEED)
+# Protected LLM Loading (GPU → CPU)
 # -----------------------------
-print(f"🚀 Loading model with preset: {ACTIVE_PRESET}")
-llm = Llama(
-    model_path=MODEL_PATH,
-    n_ctx=CONFIG["n_ctx"],
-    n_batch=CONFIG["n_batch"],
-    n_threads=CONFIG["n_threads"],
-    n_gpu_layers=CONFIG["n_gpu_layers"],
-    verbose=False,
-    use_mlock=True,      # Lock model in RAM for faster access
-    use_mmap=True        # Memory-mapped files for efficiency
-)
+def load_llm(model_path):
+    try:
+        logger.info("🚀 Loading LLM with GPU acceleration...")
+        return Llama(
+            model_path=model_path,
+            n_ctx=CONFIG["n_ctx"],
+            n_batch=CONFIG["n_batch"],
+            n_threads=CONFIG["n_threads"],
+            n_gpu_layers=CONFIG["n_gpu_layers"],
+            verbose=False,
+            use_mlock=True,
+            use_mmap=True
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ GPU load failed: {e}")
+        logger.info("💻 Falling back to CPU mode...")
+        return Llama(
+            model_path=model_path,
+            n_ctx=CONFIG["n_ctx"],
+            n_batch=CONFIG["n_batch"],
+            n_threads=CONFIG["n_threads"],
+            n_gpu_layers=0,
+            verbose=False,
+            use_mlock=False,
+            use_mmap=True
+        )
+
+logger.info(f"🧠 Loading model with preset: {ACTIVE_PRESET}")
+llm = load_llm(MODEL_PATH)
 
 # -----------------------------
-# Hybrid Retrieval (Enhanced & Optimized)
+# Hybrid Retrieval
 # -----------------------------
 def retrieve(query, k=None):
-    """Retrieve top-k relevant chunks using hybrid search"""
     if k is None:
         k = CONFIG["top_k"]
-    
+
     # Dense search (FAISS)
     q_emb = embedder.encode([query]).astype("float32")
     _, dense_ids = faiss_index.search(q_emb, k)
@@ -107,38 +132,33 @@ def retrieve(query, k=None):
         reverse=True
     )[:k]
 
-    # Merge and deduplicate results
+    # Merge + deduplicate
     ids = list(dict.fromkeys(dense_ids[0].tolist() + bm25_ids))
-    
-    # Return both document chunks and their indices for metadata access
     return [(documents[i], i) for i in ids[:k]]
 
 # -----------------------------
-# Generate Answer (RAG with AST Metadata) - OPTIMIZED
+# RAG Core Logic
 # -----------------------------
-def generate_answer(query):
-    """Generate answer using retrieved context with function/class metadata"""
+def run_rag_pipeline(query):
     results = retrieve(query)
-    
-    # Build compact context
+
     context_chunks = []
     for doc, idx in results:
-        funcs_classes = metadatas[idx].get('functions_classes', [])
+        funcs_classes = metadatas[idx].get("functions_classes", [])
         max_funcs = CONFIG.get("max_functions_shown", 3)
-        funcs_str = ', '.join(funcs_classes[:max_funcs]) if funcs_classes else 'N/A'
-        
-        # Truncate code based on config
+        funcs_str = ", ".join(funcs_classes[:max_funcs]) if funcs_classes else "N/A"
+
         max_preview = CONFIG.get("max_code_preview", 400)
         code_preview = doc[:max_preview] + "..." if len(doc) > max_preview else doc
-        
-        chunk_info = f"""📄 {metadatas[idx]['source']}
+
+        context_chunks.append(
+            f"""📄 {metadatas[idx]['source']}
 🔧 {funcs_str}
 {code_preview}"""
-        context_chunks.append(chunk_info)
-    
+        )
+
     context_text = "\n\n".join(context_chunks)
 
-    # Shorter, more directive prompt for faster generation
     prompt = f"""Code context:
 {context_text}
 
@@ -151,31 +171,39 @@ A:"""
         temperature=CONFIG["temperature"],
         top_p=0.9,
         repeat_penalty=1.1,
-        stop=["</s>", "\nQ:", "\n\n\n", "Question:"]  # Better stop sequences
+        stop=["</s>", "\nQ:", "\n\n\n", "Question:"]
     )
 
     return response["choices"][0]["text"].strip()
 
 # -----------------------------
-# CLI Interface (Optional)
+# Protected Query Pipeline (2.4)
+# -----------------------------
+def query_rag(question, repo_path=None):
+    try:
+        logger.info(f"🔍 Query received: {question}")
+        return run_rag_pipeline(question)
+    except Exception as e:
+        logger.error(f"❌ Query failed: {e}", exc_info=True)
+        return "Internal error. Check privcode.log"
+
+# -----------------------------
+# CLI Interface
 # -----------------------------
 if __name__ == "__main__":
     print("🔒 PrivCode - Secure Local Code Assistant")
     print("=" * 50)
-    
+
     while True:
         query = input("\n🔍 Ask a question (or 'exit' to quit): ").strip()
-        
-        if query.lower() in ['exit', 'quit', 'q']:
+
+        if query.lower() in ("exit", "quit", "q"):
             print("👋 Goodbye!")
             break
-        
+
         if not query:
             continue
-        
-        try:
-            print("\n💡 Generating answer...\n")
-            answer = generate_answer(query)
-            print(f"📝 Answer:\n{answer}\n")
-        except Exception as e:
-            print(f"❌ Error: {e}")
+
+        print("\n💡 Generating answer...\n")
+        answer = query_rag(query)
+        print(f"📝 Answer:\n{answer}\n")

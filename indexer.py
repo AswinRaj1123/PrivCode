@@ -11,6 +11,8 @@ import faiss
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from logger import setup_logger
+logger = setup_logger()
 
 # --------------------- CONFIG ---------------------
 REPO_PATH = "test_repo"
