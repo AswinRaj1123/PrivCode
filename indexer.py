@@ -1,164 +1,198 @@
 # indexer.py - PrivCode Incremental Indexing with AST Metadata (Enhanced)
 
 import os
+import json
 from git import Repo
 from pathlib import Path
-import json
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
-import faiss
-from rank_bm25 import BM25Okapi
 import pickle
 from tqdm import tqdm
+
+import faiss
+from rank_bm25 import BM25Okapi
+from sentence_transformers import SentenceTransformer
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # --------------------- CONFIG ---------------------
 REPO_PATH = "test_repo"
 INDEX_DIR = "index"
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
-COMMIT_FILE = os.path.join(INDEX_DIR, "last_commit.txt")
+
+METADATA_FILE = ".privcode_metadata.json"
+
+CODE_EXTENSIONS = {
+    ".py", ".js", ".java", ".ts", ".cpp", ".c", ".go", ".jsx", ".tsx"
+}
+
+SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv", "build"}
 # --------------------------------------------------
 
 os.makedirs(INDEX_DIR, exist_ok=True)
 
+# --------------------- METADATA HELPERS ---------------------
+def load_metadata(repo_path):
+    path = os.path.join(repo_path, METADATA_FILE)
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return json.load(f)
+    return {"last_commit": None}
+
+def save_metadata(repo_path, data):
+    path = os.path.join(repo_path, METADATA_FILE)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+# -----------------------------------------------------------
+
 # --------------------- OPTIONAL AST (Python only) ---------------------
 AST_ENABLED = False
-
 try:
     from tree_sitter_languages import get_parser
     parser = get_parser("python")
     AST_ENABLED = True
     print("✅ Tree-sitter enabled for AST metadata extraction")
 except ImportError:
-    print("⚠️ Tree-sitter not available — AST metadata disabled (install: pip install tree-sitter-languages)")
+    print("⚠️ Tree-sitter not available — AST metadata disabled")
 
 def extract_functions_classes(code: str):
-    """Extract function and class names from Python code using AST"""
     if not AST_ENABLED:
         return []
     try:
         tree = parser.parse(bytes(code, "utf-8"))
-        funcs = []
+        results = []
 
         def walk(node):
             if node.type in ("function_definition", "class_definition"):
                 name = node.child_by_field_name("name")
                 if name:
-                    funcs.append(name.text.decode("utf-8"))
+                    results.append(name.text.decode("utf-8"))
             for c in node.children:
                 walk(c)
 
         walk(tree.root_node)
-        return funcs
-    except Exception as e:
+        return results
+    except Exception:
         return []
+# ---------------------------------------------------------------------
 
-# --------------------------------------------------
-
-# Load embedding model
 print("🔄 Loading embedding model...")
 embedder = SentenceTransformer(EMBEDDING_MODEL)
 
-# --------------------- GIT CHANGE CHECK ---------------------
-try:
-    repo = Repo(REPO_PATH)
-    current_commit = repo.head.commit.hexsha
-except Exception as e:
-    print(f"⚠️ Git repo error: {e}. Proceeding with full indexing...")
-    current_commit = "no_git"
+# --------------------- FULL INDEX BUILD ---------------------
+def build_full_index(repo_path, index_path):
+    documents = []
+    metadatas = []
 
-if os.path.exists(COMMIT_FILE):
-    with open(COMMIT_FILE, "r") as f:
-        last_commit = f.read().strip()
-    if last_commit == current_commit:
-        print("✅ No repo changes detected — index is up to date.")
-        exit()
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        separators=["\n\n", "\n", " ", ""]
+    )
 
-print("🔄 Repo changed — rebuilding index...")
+    for root, _, files in os.walk(repo_path):
+        if any(skip in root for skip in SKIP_DIRS):
+            continue
 
-# --------------------- FILE CRAWLING ---------------------
-documents = []
-metadatas = []
+        for file in files:
+            suffix = Path(file).suffix.lower()
+            if suffix not in CODE_EXTENSIONS:
+                continue
 
-code_extensions = {".py", ".js", ".java", ".ts", ".cpp", ".c", ".go", ".jsx", ".tsx"}
-
-for root, _, files in os.walk(REPO_PATH):
-    # Skip hidden directories and common build directories
-    if any(skip in root for skip in [".git", "node_modules", "__pycache__", "venv", ".venv", "build"]):
-        continue
-    
-    for file in files:
-        if Path(file).suffix.lower() in code_extensions:
             file_path = Path(root) / file
-            rel_path = file_path.relative_to(REPO_PATH)
+            rel_path = file_path.relative_to(repo_path)
 
             try:
-                content = file_path.read_text(encoding="utf-8")
+                content = file_path.read_text(encoding="utf-8", errors="ignore")
 
-                # Extract AST metadata for Python files only
-                funcs = extract_functions_classes(content) if file_path.suffix == ".py" else []
+                funcs = extract_functions_classes(content) if suffix == ".py" else []
 
-                metadata_base = {
+                base_meta = {
                     "source": str(rel_path),
-                    "language": file_path.suffix[1:],
+                    "language": suffix[1:],
                     "functions_classes": funcs
                 }
 
-                # Smart code-aware splitting
-                splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=CHUNK_SIZE,
-                    chunk_overlap=CHUNK_OVERLAP,
-                    separators=["\n\n", "\n", " ", ""]
-                )
-
                 chunks = splitter.split_text(content)
-
                 for i, chunk in enumerate(chunks):
                     documents.append(chunk)
                     metadatas.append({
-                        **metadata_base,
+                        **base_meta,
                         "chunk_id": i,
                         "total_chunks": len(chunks)
                     })
 
             except Exception as e:
-                print(f"⚠️ Skip {file_path}: {e}")
+                print(f"⚠️ Skipped {file_path}: {e}")
 
-print(f"📦 Indexed {len(documents)} chunks from {len(set(m['source'] for m in metadatas))} files")
+    print(f"📦 Indexed {len(documents)} chunks from {len(set(m['source'] for m in metadatas))} files")
 
-# --------------------- BUILD INDEXES ---------------------
-print("🧠 Generating embeddings...")
-embeddings = embedder.encode(
-    documents,
-    normalize_embeddings=True,
-    show_progress_bar=True,
-    batch_size=32
-)
+    print("🧠 Generating embeddings...")
+    embeddings = embedder.encode(
+        documents,
+        normalize_embeddings=True,
+        show_progress_bar=True,
+        batch_size=32
+    )
 
-# FAISS vector index (semantic search)
-dim = embeddings.shape[1]
-faiss_index = faiss.IndexFlatIP(dim)
-faiss_index.add(embeddings)
-faiss.write_index(faiss_index, os.path.join(INDEX_DIR, "faiss.index"))
+    dim = embeddings.shape[1]
+    faiss_index = faiss.IndexFlatIP(dim)
+    faiss_index.add(embeddings)
+    faiss.write_index(faiss_index, os.path.join(index_path, "faiss.index"))
 
-# BM25 keyword index (lexical search)
-tokenized = [doc.split() for doc in documents]
-bm25 = BM25Okapi(tokenized)
+    tokenized = [doc.split() for doc in documents]
+    bm25 = BM25Okapi(tokenized)
 
-with open(os.path.join(INDEX_DIR, "bm25.pkl"), "wb") as f:
-    pickle.dump(bm25, f)
+    with open(os.path.join(index_path, "bm25.pkl"), "wb") as f:
+        pickle.dump(bm25, f)
 
-# Save documents and metadata
-with open(os.path.join(INDEX_DIR, "documents.json"), "w", encoding="utf-8") as f:
-    json.dump(documents, f, indent=2)
+    with open(os.path.join(index_path, "documents.json"), "w", encoding="utf-8") as f:
+        json.dump(documents, f, indent=2)
 
-with open(os.path.join(INDEX_DIR, "metadatas.json"), "w", encoding="utf-8") as f:
-    json.dump(metadatas, f, indent=2)
+    with open(os.path.join(index_path, "metadatas.json"), "w", encoding="utf-8") as f:
+        json.dump(metadatas, f, indent=2)
 
-# Save commit hash for incremental tracking
-with open(COMMIT_FILE, "w") as f:
-    f.write(current_commit)
+# --------------------- INCREMENTAL INDEX ---------------------
+def incremental_index(repo_path, index_path):
+    try:
+        repo = Repo(repo_path)
+        current_commit = repo.head.commit.hexsha
+    except Exception as e:
+        print(f"⚠️ Git error ({e}) — forcing full rebuild")
+        build_full_index(repo_path, index_path)
+        return
 
-print("✅ Incremental indexing complete — PrivCode brain upgraded!")
-print(f"💾 Index saved to: {INDEX_DIR}/")
+    metadata = load_metadata(repo_path)
+    last_commit = metadata.get("last_commit")
+
+    if last_commit == current_commit:
+        print("✅ Index already up to date.")
+        return
+
+    print("🔍 Detecting repository changes...")
+
+    if last_commit:
+        diffs = repo.commit(last_commit).diff(current_commit)
+        changed = [d.b_path for d in diffs if d.change_type in ("A", "M")]
+        deleted = [d.a_path for d in diffs if d.change_type == "D"]
+        print(f"📝 Changed files: {len(changed)}, Deleted files: {len(deleted)}")
+    else:
+        print("🆕 First-time indexing detected")
+
+    print("🔄 Rebuilding index safely (chunk-based store)...")
+    build_full_index(repo_path, index_path)
+
+    save_metadata(repo_path, {"last_commit": current_commit})
+    print("✅ Incremental index updated.")
+
+# --------------------- RUN ---------------------
+incremental_index(REPO_PATH, INDEX_DIR)
+
+# --------------------- ENCRYPT ---------------------
+from crypto_utils import encrypt_file
+
+for f in ["faiss.index", "documents.json", "metadatas.json", "bm25.pkl"]:
+    encrypt_file(os.path.join(INDEX_DIR, f))
+
+print("🔐 Index encrypted!")
+print("🚀 PrivCode brain upgraded!")
