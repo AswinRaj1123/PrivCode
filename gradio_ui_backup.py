@@ -4,8 +4,8 @@ import json
 import os
 from datetime import datetime
 from cryptography.fernet import Fernet
-from privcode import generate_answer
-from logger import setup_logger
+from backend.services.privcode import query_rag
+from backend.core.logger import setup_logger
 logger = setup_logger()
 
 # --------------------- SECURITY SETUP ---------------------
@@ -59,21 +59,14 @@ def chat_response(message, history):
     if not message.strip():
         return history, ""
 
-    result = generate_answer(message)
+    answer_text = query_rag(message)
+    result = {"answer": answer_text, "sources": [], "potential_issues": [], "suggestions": []}
     log_query(message, result)
 
-    # Parse result (handle both dict and string responses)
-    if isinstance(result, dict):
-        answer = result.get("answer", "No detailed answer generated.")
-        sources = result.get("sources", [])
-        issues = result.get("potential_issues", [])
-        suggestions = result.get("suggestions", [])
-    else:
-        # Fallback if generate_answer returns a string
-        answer = str(result)
-        sources = []
-        issues = []
-        suggestions = []
+    answer = result.get("answer", "No detailed answer generated.")
+    sources = result.get("sources", [])
+    issues = result.get("potential_issues", [])
+    suggestions = result.get("suggestions", [])
 
     # Build formatted response
     response = f"**Answer:**\n{answer}\n\n"

@@ -2,25 +2,24 @@
 
 import logging
 import sys
+from pathlib import Path
 
-def setup_logger(name="PrivCode", log_file="privcode.log"):
+
+def setup_logger(name: str = "PrivCode", log_file: str = "privcode.log"):
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
 
     if logger.handlers:
         return logger
 
-    formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)s | %(message)s"
-    )
+    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
 
-    # Console handler (UTF-8 safe)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     console_handler.setLevel(logging.INFO)
 
-    # File handler (always UTF-8)
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    log_path = Path(log_file)
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
     file_handler.setFormatter(formatter)
 
     logger.addHandler(console_handler)
