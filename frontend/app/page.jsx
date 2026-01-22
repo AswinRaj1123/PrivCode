@@ -5,17 +5,21 @@ import { useRouter } from "next/navigation";
 
 export default function Home() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const token = localStorage.getItem("token");
     if (token) {
-      setIsAuthenticated(true);
       router.push("/chat");
     } else {
       router.push("/login");
     }
   }, [router]);
+
+  if (!mounted) {
+    return null;
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800">

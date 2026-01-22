@@ -11,21 +11,27 @@ ROLES = {
     "admin": "full_access",
 }
 
+
+def _initialize_users():
+    """Initialize users from environment variables or defaults."""
+    return {
+        os.getenv("ADMIN_USERNAME", "admin"): {
+            "password_hash": hashlib.sha256(
+                os.getenv("ADMIN_PASSWORD", "admin123").encode()
+            ).hexdigest(),
+            "role": "admin",
+        },
+        os.getenv("VIEWER_USERNAME", "viewer"): {
+            "password_hash": hashlib.sha256(
+                os.getenv("VIEWER_PASSWORD", "viewer123").encode()
+            ).hexdigest(),
+            "role": "viewer",
+        },
+    }
+
+
 # In-memory user store (replace with database in production)
-USERS = {
-    os.getenv("ADMIN_USERNAME", "admin"): {
-        "password_hash": hashlib.sha256(
-            os.getenv("ADMIN_PASSWORD", "admin123").encode()
-        ).hexdigest(),
-        "role": "admin",
-    },
-    os.getenv("VIEWER_USERNAME", "viewer"): {
-        "password_hash": hashlib.sha256(
-            os.getenv("VIEWER_PASSWORD", "viewer123").encode()
-        ).hexdigest(),
-        "role": "viewer",
-    },
-}
+USERS = _initialize_users()
 
 JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
 JWT_ALGORITHM = "HS256"
