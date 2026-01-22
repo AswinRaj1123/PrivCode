@@ -47,7 +47,8 @@ fn start_backend() {
                 if let Some(repo) = repo_root {
                     let python_exe = repo.join("venv").join("Scripts").join("python.exe");
                     match Command::new(&python_exe)
-                        .arg("backend/app.py")
+                        .arg("-m")
+                        .arg("backend.app")
                         .current_dir(repo)
                         .spawn()
                     {
