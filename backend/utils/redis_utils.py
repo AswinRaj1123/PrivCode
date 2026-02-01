@@ -5,57 +5,57 @@ from redisvl.index import SearchIndex
 from redisvl.schema import IndexSchema
 from sentence_transformers import SentenceTransformer
 
-load_dotenv()  # Load .env vars
+load_dotenv()
 
-# Connect to Redis (using REDIS_URL from .env)
-REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379')
-redis_client = Redis.from_url(REDIS_URL)
+# Redis connection
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+redis_client = Redis.from_url(REDIS_URL, decode_responses=False)
 
-# Offline embedding model (downloads on first run, ~100MB)
-EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'all-MiniLM-L6-v2')
+# Embedding model (offline, small)
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 embedder = SentenceTransformer(EMBEDDING_MODEL)
+VECTOR_DIMS = embedder.get_sentence_embedding_dimension()  # 384
 
-# Define schema for PrivCode index (unified: vectors + text + metadata)
-# This matches doc: HNSW vectors, full-text, JSON metadata, tags for filters
+# Redis index schema (matches architecture doc)
 schema = IndexSchema.from_dict({
-    'index': {
-        'name': 'privcode_index',  # Index name
-        'prefix': 'code:',  # Key prefix for docs (e.g., code:123)
+    "index": {
+        "name": "privcode_index",
+        "prefix": "code:",
+        "storage_type": "hash"
     },
-    'fields': [
-        # For keyword/full-text search (RediSearch)
-        {'name': 'content', 'type': 'text', 'attrs': {'weight': 1.0}},
-        # For semantic search (HNSW vector index, dim from model)
-        {'name': 'vector', 'type': 'vector', 'attrs': {
-            'algorithm': 'hnsw',  # Fast approximate nearest neighbors
-            'distance_metric': 'cosine',  # Good for text
-            'dims': embedder.get_sentence_embedding_dimension(),  # 384 for MiniLM
-            'm': 16,  # HNSW params (default balance speed/accuracy)
-            'ef_construction': 200
-        }},
-        # For AST metadata (JSON string)
-        {'name': 'metadata', 'type': 'text'},  # Or use RedisJSON if needed
-        # Tags for filters (e.g., query only Python files)
-        {'name': 'file_path', 'type': 'tag', 'attrs': {'separator': '|'}},
-        {'name': 'language', 'type': 'tag', 'attrs': {'separator': '|'}}
+    "fields": [
+        {"name": "content", "type": "text"},
+        {
+            "name": "vector",
+            "type": "vector",
+            "attrs": {
+                "dims": VECTOR_DIMS,
+                "algorithm": "hnsw",
+                "distance_metric": "cosine",
+                "datatype": "float32"
+            }
+        },
+        {"name": "metadata", "type": "text"},
+        {"name": "file_path", "type": "tag"},
+        {"name": "language", "type": "tag"}
     ]
 })
 
-# Create or connect to index
-index = SearchIndex(schema, redis_client)
+index = SearchIndex(schema, redis_client, validate=False)
+
 if not index.exists():
     index.create()
-    print("Created new PrivCode index in Redis.")
+    print("✅ Created Redis index: privcode_index")
+else:
+    print("✅ Connected to existing Redis index")
 
-def test_connection():
-    """Simple test: Ping Redis and check index info."""
-    if redis_client.ping():
-        print("Redis connected successfully!")
-        # Check index stats
-        info = index.info()
-        print(f"Index stats: {info}")
-    else:
-        raise ConnectionError("Failed to connect to Redis.")
+def get_index():
+    return index
+
+def test_redis():
+    assert redis_client.ping()
+    print("✅ Redis ping OK")
+    print(index.info())
 
 if __name__ == "__main__":
-    test_connection()
+    test_redis()

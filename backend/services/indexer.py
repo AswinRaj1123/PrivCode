@@ -1,204 +1,162 @@
-# indexer.py - PrivCode Incremental Indexing with AST Metadata (Encrypted)
-
 import json
 import os
-import pickle
+import hashlib
+import numpy as np
 from pathlib import Path
 
 from git import Repo
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer
-import faiss
 from tqdm import tqdm
+from sentence_transformers import SentenceTransformer
 
-from backend.core.logger import setup_logger
-from backend.services.crypto_utils import encrypt_file
+from ..utils.redis_utils import get_index
+from ..utils.ast_parser import extract_ast_metadata
+from ..core.logger import setup_logger
+
+# -----------------------------------------------------------------------------
+# Setup
+# -----------------------------------------------------------------------------
 
 logger = setup_logger()
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 REPO_PATH = ROOT_DIR / "test_repo"
-INDEX_DIR = ROOT_DIR / "index"
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
-
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
 METADATA_FILE = ".privcode_metadata.json"
 
 CODE_EXTENSIONS = {".py", ".js", ".java", ".ts", ".cpp", ".c", ".go", ".jsx", ".tsx"}
 SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv", "build"}
 
-os.makedirs(INDEX_DIR, exist_ok=True)
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 100
 
+# Redis index
+index = get_index()
 
-def load_metadata(repo_path):
-    path = Path(repo_path) / METADATA_FILE
-    if path.exists():
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
+# Embedding model (same one used in redis_utils)
+logger.info("🧠 Loading embedding model...")
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+
+# -----------------------------------------------------------------------------
+# Metadata helpers (Git incremental indexing)
+# -----------------------------------------------------------------------------
+
+def load_metadata(repo_path: Path):
+    meta_path = repo_path / METADATA_FILE
+    if meta_path.exists():
+        return json.loads(meta_path.read_text(encoding="utf-8"))
     return {"last_commit": None}
 
 
-def save_metadata(repo_path, data):
-    path = Path(repo_path) / METADATA_FILE
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+def save_metadata(repo_path: Path, data: dict):
+    meta_path = repo_path / METADATA_FILE
+    meta_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-AST_ENABLED = False
-try:
-    from tree_sitter_languages import get_parser
+# -----------------------------------------------------------------------------
+# Chunking helper
+# -----------------------------------------------------------------------------
 
-    parser = get_parser("python")
-    AST_ENABLED = True
-    print("✅ Tree-sitter enabled for AST metadata extraction")
-except ImportError:
-    print("⚠️ Tree-sitter not available — AST metadata disabled")
+def chunk_code(text: str):
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + CHUNK_SIZE
+        chunks.append(text[start:end])
+        start = end - CHUNK_OVERLAP
+    return chunks
 
 
-def extract_functions_classes(code: str):
-    if not AST_ENABLED:
-        return []
+# -----------------------------------------------------------------------------
+# Redis indexing logic
+# -----------------------------------------------------------------------------
+
+def index_file(file_path: Path, repo_root: Path):
     try:
-        tree = parser.parse(bytes(code, "utf-8"))
-        results = []
+        content = file_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception as exc:
+        logger.warning("⚠️ Failed to read %s: %s", file_path, exc)
+        return
 
-        def walk(node):
-            if node.type in ("function_definition", "class_definition"):
-                name = node.child_by_field_name("name")
-                if name:
-                    results.append(name.text.decode("utf-8"))
-            for child in node.children:
-                walk(child)
+    rel_path = file_path.relative_to(repo_root)
+    language = file_path.suffix.lstrip(".")
 
-        walk(tree.root_node)
-        return results
-    except Exception:  # noqa: BLE001
-        return []
+    chunks = chunk_code(content)
 
+    for i, chunk in enumerate(chunks):
+        vector = np.array(
+            embedder.encode(chunk),
+            dtype=np.float32
+        ).tobytes()
+        ast_metadata = extract_ast_metadata(chunk, str(rel_path))
 
-print("🔄 Loading embedding model...")
-embedder = SentenceTransformer(EMBEDDING_MODEL)
+        # Stable deterministic Redis key
+        doc_id = "code:" + hashlib.sha256(
+            f"{rel_path}-{i}".encode()
+        ).hexdigest()[:16]
 
+        payload = {
+            "content": chunk,
+            "vector": vector,
+            "metadata": ast_metadata,
+            "file_path": str(rel_path),
+            "language": language,
+        }
 
-def encrypt_and_cleanup(index_dir: Path):
-    files = [
-        "faiss.index",
-        "bm25.pkl",
-        "documents.json",
-        "metadatas.json",
-    ]
+        index.load([payload], keys=[doc_id])
 
-    for fname in files:
-        path = index_dir / fname
-        if path.exists():
-            encrypt_file(path)
-            path.unlink(missing_ok=True)
-            logger.info("🔐 Encrypted & removed plaintext: %s", fname)
-
-    logger.info("✅ Index fully encrypted.")
+    logger.info("📄 Indexed %s (%d chunks)", rel_path, len(chunks))
 
 
-def build_full_index(repo_path, index_path):
-    repo_path = Path(repo_path)
-    index_path = Path(index_path)
+# -----------------------------------------------------------------------------
+# Full index build (Redis)
+# -----------------------------------------------------------------------------
 
-    documents = []
-    metadatas = []
+def build_full_index(repo_path: Path):
+    logger.info("🔄 Building full Redis index...")
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        separators=["\n\n", "\n", " ", ""],
-    )
-
-    for root, _, files in os.walk(repo_path):
-        if any(skip in root for skip in SKIP_DIRS):
-            continue
+    for root, dirs, files in os.walk(repo_path):
+        # Skip unwanted directories
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
 
         for file in files:
-            suffix = Path(file).suffix.lower()
-            if suffix not in CODE_EXTENSIONS:
+            file_path = Path(root) / file
+            if file_path.suffix.lower() not in CODE_EXTENSIONS:
                 continue
 
-            file_path = Path(root) / file
-            rel_path = file_path.relative_to(repo_path)
+            index_file(file_path, repo_path)
 
-            try:
-                content = file_path.read_text(encoding="utf-8", errors="ignore")
-                funcs = extract_functions_classes(content) if suffix == ".py" else []
-
-                base_meta = {
-                    "source": str(rel_path),
-                    "language": suffix[1:],
-                    "functions_classes": funcs,
-                }
-
-                chunks = splitter.split_text(content)
-                for i, chunk in enumerate(chunks):
-                    documents.append(chunk)
-                    metadatas.append({
-                        **base_meta,
-                        "chunk_id": i,
-                        "total_chunks": len(chunks),
-                    })
-
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("⚠️ Skipped %s: %s", file_path, exc)
-
-    logger.info("📦 Indexed %s chunks", len(documents))
-
-    logger.info("🧠 Generating embeddings...")
-    embeddings = embedder.encode(
-        documents,
-        normalize_embeddings=True,
-        show_progress_bar=True,
-        batch_size=32,
-    )
-
-    dim = embeddings.shape[1]
-    faiss_index = faiss.IndexFlatIP(dim)
-    faiss_index.add(embeddings)
-    faiss.write_index(faiss_index, str(index_path / "faiss.index"))
-
-    tokenized = [doc.split() for doc in documents]
-    bm25 = BM25Okapi(tokenized)
-
-    with (index_path / "bm25.pkl").open("wb") as f:
-        pickle.dump(bm25, f)
-
-    (index_path / "documents.json").write_text(
-        json.dumps(documents), encoding="utf-8"
-    )
-    (index_path / "metadatas.json").write_text(
-        json.dumps(metadatas), encoding="utf-8"
-    )
+    logger.info("✅ Full indexing completed.")
 
 
-def incremental_index(repo_path, index_path):
+# -----------------------------------------------------------------------------
+# Incremental indexing (Git-aware)
+# -----------------------------------------------------------------------------
+
+def incremental_index(repo_path: Path):
     try:
         repo = Repo(repo_path)
         current_commit = repo.head.commit.hexsha
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("⚠️ Git error (%s) — forcing full rebuild", exc)
-        build_full_index(repo_path, index_path)
-        encrypt_and_cleanup(Path(index_path))
+    except Exception as exc:
+        logger.warning("⚠️ Git error (%s). Running full index.", exc)
+        build_full_index(repo_path)
         return
 
     metadata = load_metadata(repo_path)
     last_commit = metadata.get("last_commit")
 
     if last_commit == current_commit:
-        logger.info("✅ Index already up to date.")
+        logger.info("✅ Repository already indexed (no changes).")
         return
 
-    logger.info("🔍 Detecting repository changes...")
-    build_full_index(repo_path, index_path)
+    logger.info("🔍 Repository changed — re-indexing...")
+    build_full_index(repo_path)
 
     save_metadata(repo_path, {"last_commit": current_commit})
-    encrypt_and_cleanup(Path(index_path))
+    logger.info("💾 Updated indexing metadata.")
 
+
+# -----------------------------------------------------------------------------
+# Entry point
+# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    incremental_index(REPO_PATH, INDEX_DIR)
+    incremental_index(REPO_PATH)
