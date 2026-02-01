@@ -1,164 +1,165 @@
+# privcode.py — PrivCode Full RAG Engine (Day 3 FINAL, BULLETPROOF)
+
 import json
-import logging
-import os
-import pickle
-from pathlib import Path
+import re
+from typing import List, Dict
 
-import faiss
-import numpy as np
 from llama_cpp import Llama
-from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer
 
-from backend.core.config import PRESETS, ACTIVE_PRESET
-from backend.services.crypto_utils import decrypt_file
+from .retriever import hybrid_retrieve
+from ..core.logger import setup_logger
 
+# -----------------------------------------------------------------------------
+# Setup
+# -----------------------------------------------------------------------------
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-logger = logging.getLogger("PrivCode")
+logger = setup_logger()
 
-CONFIG = PRESETS[ACTIVE_PRESET]
+MODEL_PATH = "models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf"
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
-INDEX_DIR = ROOT_DIR / "index"
-MODEL_PATH = ROOT_DIR / "models" / "Meta-Llama-3-8B-Instruct-Q4_K_M.gguf"
+logger.info("🧠 Loading local LLM...")
+llm = Llama(
+    model_path=MODEL_PATH,
+    n_ctx=2048,          # reduced for speed
+    n_threads=6,
+    n_gpu_layers=0,      # CPU mode
+    verbose=False,
+)
 
-INDEX_FILES = [
-    "faiss.index",
-    "bm25.pkl",
-    "documents.json",
-    "metadatas.json",
-]
+# -----------------------------------------------------------------------------
+# Prompt Augmentation
+# -----------------------------------------------------------------------------
 
-for fname in INDEX_FILES:
-    enc_path = INDEX_DIR / f"{fname}.enc"
-    orig_path = INDEX_DIR / fname
+def build_augmented_prompt(query: str, contexts: List[Dict]) -> str:
+    allowed_files = sorted({ctx["file_path"] for ctx in contexts})
 
-    if enc_path.exists():
-        decrypt_file(enc_path, orig_path)
-        logger.info("🔓 Decrypted %s", fname)
+    prompt = f"""
+You are an expert software engineer analyzing a private startup codebase.
 
-faiss_index = faiss.read_index(str(INDEX_DIR / "faiss.index"))
+STRICT RULES (VERY IMPORTANT):
+- Use ONLY the provided code context.
+- Do NOT guess or hallucinate.
+- If the answer is not in the context, say "Not found in the provided code."
+- Do NOT use markdown.
+- Output ONLY ONE JSON object.
+- Output must start with '{{' and end with '}}'.
 
-with open(INDEX_DIR / "documents.json", "r", encoding="utf-8") as f:
-    documents = json.load(f)
+The ONLY files you are allowed to reference are:
+{allowed_files}
 
-with open(INDEX_DIR / "metadatas.json", "r", encoding="utf-8") as f:
-    metadatas = json.load(f)
+Retrieved Code Context:
+"""
 
-with open(INDEX_DIR / "bm25.pkl", "rb") as f:
-    bm25 = pickle.load(f)
+    for i, ctx in enumerate(contexts, 1):
+        prompt += f"""
+--- Chunk {i} ---
+File: {ctx["file_path"]}
+Similarity Score: {ctx["score"]}
 
-embedder = SentenceTransformer("BAAI/bge-small-en-v1.5")
+Code:
+{ctx["content"]}
 
+AST Metadata:
+{json.dumps(ctx["metadata"], indent=2)}
+"""
 
-def load_llm(model_path: Path):
-    try:
-        logger.info("🚀 Loading LLM with GPU acceleration...")
-        return Llama(
-            model_path=str(model_path),
-            n_ctx=CONFIG["n_ctx"],
-            n_batch=CONFIG["n_batch"],
-            n_threads=CONFIG["n_threads"],
-            n_gpu_layers=CONFIG["n_gpu_layers"],
-            verbose=False,
-            use_mlock=True,
-            use_mmap=True,
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.warning("⚠️ GPU load failed: %s", e)
-        logger.info("💻 Falling back to CPU mode...")
-        return Llama(
-            model_path=str(model_path),
-            n_ctx=CONFIG["n_ctx"],
-            n_batch=CONFIG["n_batch"],
-            n_threads=CONFIG["n_threads"],
-            n_gpu_layers=0,
-            verbose=False,
-            use_mlock=False,
-            use_mmap=True,
-        )
+    prompt += f"""
+User Question:
+{query}
 
+Respond ONLY in this exact JSON format:
 
-logger.info("🧠 Loading model with preset: %s", ACTIVE_PRESET)
-llm = load_llm(MODEL_PATH)
+{{
+  "summary": "One-line concise answer",
+  "explanation": "Detailed explanation grounded in the code",
+  "bugs_found": [],
+  "suggestions": [],
+  "sources": ["file.py"]
+}}
+"""
+    return prompt
 
+# -----------------------------------------------------------------------------
+# Robust JSON Extraction (PRODUCTION SAFE)
+# -----------------------------------------------------------------------------
 
-def retrieve(query: str, k: int | None = None):
-    if k is None:
-        k = CONFIG["top_k"]
+def extract_first_valid_json(text: str) -> Dict:
+    """
+    Extract the FIRST valid JSON object from messy LLM output.
+    Handles:
+    - multiple JSON blocks
+    - markdown fences
+    - extra text
+    - partial generations
+    """
+    # Remove markdown fences
+    text = re.sub(r"```(?:json)?", "", text)
 
-    q_emb = embedder.encode([query], normalize_embeddings=True).astype("float32")
-    _, dense_ids = faiss_index.search(q_emb, k)
+    # Find all possible JSON blocks
+    candidates = re.findall(r"\{[\s\S]*?\}", text)
 
-    tokenized_query = query.split()
-    bm25_scores = bm25.get_scores(tokenized_query)
-    bm25_ids = sorted(
-        range(len(bm25_scores)),
-        key=lambda i: bm25_scores[i],
-        reverse=True,
-    )[:k]
+    for block in candidates:
+        try:
+            return json.loads(block)
+        except json.JSONDecodeError:
+            continue
 
-    ids = list(dict.fromkeys(dense_ids[0].tolist() + bm25_ids))
-    return [(documents[i], i) for i in ids[:k]]
+    raise ValueError("No valid JSON object found")
 
+# -----------------------------------------------------------------------------
+# Full RAG Pipeline
+# -----------------------------------------------------------------------------
 
-def run_rag_pipeline(query: str):
-    results = retrieve(query)
+def rag_query(query: str, top_k: int = 3) -> Dict:
+    logger.info("🔍 Retrieving context for query: %s", query)
+    contexts = hybrid_retrieve(query, top_k=top_k)
 
-    context_chunks = []
-    for doc, idx in results:
-        funcs = metadatas[idx].get("functions_classes", [])
-        max_funcs = CONFIG.get("max_functions_shown", 3)
+    if not contexts:
+        return {"error": "No relevant code found"}
 
-        funcs_str = ", ".join(funcs[:max_funcs]) if funcs else "N/A"
+    prompt = build_augmented_prompt(query, contexts)
 
-        max_preview = CONFIG.get("max_code_preview", 400)
-        preview = doc[:max_preview] + "..." if len(doc) > max_preview else doc
-
-        context_chunks.append(
-            f"""📄 {metadatas[idx]['source']}
-🔧 {funcs_str}
-{preview}"""
-        )
-
-    context_text = "\n\n".join(context_chunks)
-
-    prompt = f"""Code context:
-{context_text}
-
-Q: {query}
-A:"""
-
+    logger.info("🧠 Generating response with LLM...")
     response = llm(
         prompt,
-        max_tokens=CONFIG["max_tokens"],
-        temperature=CONFIG["temperature"],
+        max_tokens=256,   # FAST mode
+        temperature=0.1,  # reduces hallucination
         top_p=0.9,
-        repeat_penalty=1.1,
-        stop=["</s>", "\nQ:", "\n\n\n", "Question:"],
     )
 
-    return response["choices"][0]["text"].strip()
+    raw_text = response["choices"][0]["text"].strip()
 
-
-def query_rag(question: str):
     try:
-        logger.info("🔍 Query received: %s", question)
-        return run_rag_pipeline(question)
-    except Exception as e:  # noqa: BLE001
-        logger.error("❌ Query failed: %s", e, exc_info=True)
-        return "Internal error. Check logs."
+        parsed = extract_first_valid_json(raw_text)
 
+        # Enforce correct sources
+        parsed["sources"] = list(
+            sorted({ctx["file_path"] for ctx in contexts})
+        )
+
+        logger.info("✅ LLM response parsed successfully")
+        return parsed
+
+    except Exception as exc:
+        logger.error("❌ Failed to parse LLM output: %s", exc)
+        return {
+            "error": "Failed to parse LLM output",
+            "raw_output": raw_text,
+        }
+
+# -----------------------------------------------------------------------------
+# CLI Entry
+# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    print("🔒 PrivCode – Secure Local Code Assistant")
-    print("=" * 50)
+    print("\n🔒 PrivCode — Secure Local Code Assistant")
+    print("=" * 60)
 
     while True:
         query = input("\n🔍 Ask a question (or 'exit'): ").strip()
-        if query.lower() in ("exit", "quit", "q"):
+        if query.lower() in {"exit", "quit", "q"}:
             break
 
-        answer = query_rag(query)
-        print("\n🧠 Answer:\n" + answer + "\n")
+        result = rag_query(query)
+        print("\n🧠 Answer:\n")
+        print(json.dumps(result, indent=2))
