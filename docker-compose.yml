@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis/redis-stack:7.2.0-v9
+    container_name: privcode-redis
+    ports:
+      - "6379:6379"
+      - "8001:8001"
+    volumes:
+      - redis-data:/data
+    environment:
+      - REDIS_PASSWORD=privcode_secret
+      - REDIS_ARGS=--appendonly yes
+
+volumes:
+  redis-data:
