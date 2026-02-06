@@ -1,10 +1,21 @@
 # auth.py - Role-based access control with authentication
 
-import os
-import jwt
 import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, Dict
+
+# Import config from config.py - ENFORCES .env requirements
+from core.config import (
+    JWT_SECRET,
+    JWT_ALGORITHM,
+    JWT_EXPIRATION_HOURS,
+    ADMIN_USERNAME,
+    ADMIN_PASSWORD,
+    VIEWER_USERNAME,
+    VIEWER_PASSWORD,
+)
+
+import jwt
 
 ROLES = {
     "viewer": "view_only",
@@ -13,18 +24,14 @@ ROLES = {
 
 
 def _initialize_users():
-    """Initialize users from environment variables or defaults."""
+    """Initialize users from config (enforces .env)."""
     return {
-        os.getenv("ADMIN_USERNAME", "admin"): {
-            "password_hash": hashlib.sha256(
-                os.getenv("ADMIN_PASSWORD", "admin123").encode()
-            ).hexdigest(),
+        ADMIN_USERNAME: {
+            "password_hash": hashlib.sha256(ADMIN_PASSWORD.encode()).hexdigest(),
             "role": "admin",
         },
-        os.getenv("VIEWER_USERNAME", "viewer"): {
-            "password_hash": hashlib.sha256(
-                os.getenv("VIEWER_PASSWORD", "viewer123").encode()
-            ).hexdigest(),
+        VIEWER_USERNAME: {
+            "password_hash": hashlib.sha256(VIEWER_PASSWORD.encode()).hexdigest(),
             "role": "viewer",
         },
     }
@@ -33,20 +40,14 @@ def _initialize_users():
 # In-memory user store (replace with database in production)
 USERS = _initialize_users()
 
-JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRATION_HOURS = 24
-
 
 def hash_password(password: str) -> str:
     """Hash a password using SHA-256."""
-
     return hashlib.sha256(password.encode()).hexdigest()
 
 
 def verify_password(password: str, password_hash: str) -> bool:
     """Verify a password against its hash."""
-
     return hash_password(password) == password_hash
 
 
