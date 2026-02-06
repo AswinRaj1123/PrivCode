@@ -3,14 +3,23 @@
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from backend.services.privcode import query_rag
 from backend.services.indexer import incremental_index
 from backend.core.logger import setup_logger
-from backend.core.auth import authenticate_user, create_token, verify_token, check_role
+from backend.core.auth import (
+    authenticate_user,
+    create_token,
+    verify_token,
+    check_role,
+)
+
+# 🔹 NEW: Action Logger Import
+from utils.logger import log_action
+
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
@@ -77,55 +86,166 @@ def health():
     return {"status": "ok"}
 
 
+# =========================================================
+# 🔐 LOGIN ENDPOINT WITH LOGGING
+# =========================================================
 @app.post("/login", response_model=LoginResponse)
 def login(req: LoginRequest):
     user = authenticate_user(req.username, req.password)
 
+    # ❌ Failed Login Logging
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        log_action(
+            user_email=req.username,  # using username as email identifier
+            role="unknown",
+            action="login",
+            status="FAILED",
+            details={"reason": "Invalid username or password"},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+        )
 
+    # ✅ Success Login Logging
     token = create_token(user["username"], user["role"])
 
-    return LoginResponse(token=token, username=user["username"], role=user["role"])
+    log_action(
+        user_email=user["username"],
+        role=user["role"],
+        action="login",
+        status="SUCCESS",
+    )
+
+    return LoginResponse(
+        token=token,
+        username=user["username"],
+        role=user["role"],
+    )
 
 
+# =========================================================
+# 📦 INDEX ENDPOINT WITH LOGGING
+# =========================================================
 @app.post("/index")
-def index_repo(req: IndexRequest, current_user: dict = Depends(get_current_user)):
+def index_repo(
+    req: IndexRequest,
+    current_user: dict = Depends(get_current_user),
+):
     try:
+        # Role Check
         check_role(current_user["role"], "full_access")
+
         incremental_index(req.repo_path, req.index_path)
+
         logger.info(
             "User %s indexed repository: %s",
             current_user["username"],
             req.repo_path,
         )
+
+        # ✅ Success Log
+        log_action(
+            user_email=current_user["username"],
+            role=current_user["role"],
+            action="index",
+            status="SUCCESS",
+            details={"repo": req.repo_path},
+        )
+
         return {"status": "indexed"}
+
     except PermissionError as e:
+        # ❌ Permission Failure Log
+        log_action(
+            user_email=current_user["username"],
+            role=current_user["role"],
+            action="index",
+            status="ERROR",
+            details={"repo": req.repo_path, "error": str(e)},
+        )
         raise HTTPException(status_code=403, detail=str(e))
+
     except Exception as e:  # noqa: BLE001
         logger.exception("Indexing failed")
+
+        # ❌ System Failure Log
+        log_action(
+            user_email=current_user["username"],
+            role=current_user["role"],
+            action="index",
+            status="ERROR",
+            details={"repo": req.repo_path, "error": str(e)},
+        )
+
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =========================================================
+# 🔎 QUERY ENDPOINT WITH LOGGING
+# =========================================================
 @app.post("/query")
-def query(req: QueryRequest, current_user: dict = Depends(get_current_user)):
+def query(
+    req: QueryRequest,
+    current_user: dict = Depends(get_current_user),
+):
     try:
         response = query_rag(req.question)
+
         logger.info(
-            "User %s queried: %s", current_user["username"], req.question[:50]
+            "User %s queried: %s",
+            current_user["username"],
+            req.question[:50],
         )
+
+        # ✅ Success Log
+        log_action(
+            user_email=current_user["username"],
+            role=current_user["role"],
+            action="query",
+            query=req.question,
+            status="SUCCESS",
+            response_summary=str(response)[:200],
+        )
+
         return {"response": response}
-    except Exception:  # noqa: BLE001
+
+    except Exception as e:  # noqa: BLE001
         logger.exception("Query failed")
+
+        # ❌ Failure Log
+        log_action(
+            user_email=current_user["username"],
+            role=current_user["role"],
+            action="query",
+            query=req.question,
+            status="ERROR",
+            details={"error": str(e)},
+        )
+
         raise HTTPException(status_code=500, detail="Internal error")
 
 
+# =========================================================
+# 👤 CURRENT USER
+# =========================================================
 @app.get("/me")
 def get_me(current_user: dict = Depends(get_current_user)):
-    return {"username": current_user["username"], "role": current_user["role"]}
+    return {
+        "username": current_user["username"],
+        "role": current_user["role"],
+    }
 
 
+# =========================================================
+# 🚀 MAIN
+# =========================================================
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("backend.app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "backend.app:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+    )
