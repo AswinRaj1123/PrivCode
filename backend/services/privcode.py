@@ -1,13 +1,15 @@
 # privcode.py — PrivCode Full RAG Engine (Day 3 FINAL, BULLETPROOF)
 
 import json
+import os
 import re
+from pathlib import Path
 from typing import List, Dict
 
 from llama_cpp import Llama
 
-from .retriever import hybrid_retrieve
-from ..core.logger import setup_logger
+from services.retriever import hybrid_retrieve
+from core.logger import setup_logger
 
 # -----------------------------------------------------------------------------
 # Setup
@@ -15,16 +17,34 @@ from ..core.logger import setup_logger
 
 logger = setup_logger()
 
-MODEL_PATH = "models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf"
+# Get the project root (2 levels up from backend/services/)
+ROOT_DIR = Path(__file__).resolve().parents[2]
+MODEL_PATH = ROOT_DIR / "models" / "Meta-Llama-3-8B-Instruct-Q4_K_M.gguf"
 
-logger.info("🧠 Loading local LLM...")
-llm = Llama(
-    model_path=MODEL_PATH,
-    n_ctx=2048,          # reduced for speed
-    n_threads=6,
-    n_gpu_layers=0,      # CPU mode
-    verbose=False,
-)
+# Lazy load LLM only when needed
+llm = None
+
+def get_llm():
+    """Lazy load the LLM model"""
+    global llm
+    if llm is None:
+        if not MODEL_PATH.exists():
+            raise FileNotFoundError(
+                f"❌ LLM model not found at: {MODEL_PATH}\n"
+                f"Please download the model and place it in the models/ directory.\n"
+                f"Download from: https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF"
+            )
+        
+        logger.info("🧠 Loading local LLM from: %s", MODEL_PATH)
+        llm = Llama(
+            model_path=str(MODEL_PATH),
+            n_ctx=2048,          # reduced for speed
+            n_threads=6,
+            n_gpu_layers=0,      # CPU mode
+            verbose=False,
+        )
+        logger.info("✅ LLM loaded successfully")
+    return llm
 
 # -----------------------------------------------------------------------------
 # Prompt Augmentation
@@ -120,7 +140,18 @@ def rag_query(query: str, top_k: int = 3) -> Dict:
     prompt = build_augmented_prompt(query, contexts)
 
     logger.info("🧠 Generating response with LLM...")
-    response = llm(
+    
+    try:
+        model = get_llm()
+    except FileNotFoundError as e:
+        logger.error(str(e))
+        return {
+            "error": "LLM model not available",
+            "message": str(e),
+            "contexts": contexts  # Still return the retrieved context
+        }
+    
+    response = model(
         prompt,
         max_tokens=256,   # FAST mode
         temperature=0.1,  # reduces hallucination

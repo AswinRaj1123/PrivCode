@@ -1,61 +1,138 @@
-import axios from 'axios';
+import axios from "axios";
+import { jwtDecode } from "jwt-decode";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// =====================================================
+// 🔧 AXIOS INSTANCE
+// =====================================================
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-const apiClient = axios.create({
+const api = axios.create({
   baseURL: API_URL,
   headers: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
 });
 
-// Add auth token to requests
-apiClient.interceptors.request.use(
+// =====================================================
+// 🔐 REQUEST INTERCEPTOR
+// Auto-attach JWT token
+// =====================================================
+api.interceptors.request.use(
   (config) => {
-    if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('token');
+    if (typeof window !== "undefined") {
+      const token = localStorage.getItem("token"); // matches your backend
+
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
     }
+
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Handle 401 responses
-apiClient.interceptors.response.use(
+// =====================================================
+// 🚨 RESPONSE INTERCEPTOR
+// Auto logout on 401
+// =====================================================
+api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      if (typeof window !== 'undefined') {
-        localStorage.clear();
-        window.location.href = '/login';
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+
+        window.location.href = "/login";
       }
     }
+
     return Promise.reject(error);
   }
 );
 
-export const api = {
-  // Auth endpoints
-  login: (username, password) =>
-    apiClient.post('/login', { username, password }),
-  
-  getCurrentUser: () =>
-    apiClient.get('/me'),
-  
-  // Query endpoint
-  query: (question, repoPath) =>
-    apiClient.post('/query', { question, repo_path: repoPath }),
-  
-  // Index endpoint
-  index: (repoPath, indexPath) =>
-    apiClient.post('/index', { repo_path: repoPath, index_path: indexPath }),
-  
-  // Health check
-  health: () =>
-    apiClient.get('/health'),
+// =====================================================
+// 👤 HELPER — GET CURRENT USER FROM TOKEN
+// =====================================================
+export const getCurrentUserFromToken = () => {
+  if (typeof window === "undefined") return null;
+
+  const token = localStorage.getItem("token");
+  if (!token) return null;
+
+  try {
+    const decoded = jwtDecode(token);
+    return decoded; // { username, role, exp, ... }
+  } catch (err) {
+    console.error("Invalid token", err);
+    return null;
+  }
 };
 
-export default apiClient;
+// =====================================================
+// 🔐 AUTH APIs
+// =====================================================
+export const loginUser = async (username, password) => {
+  const res = await api.post("/login", {
+    username,
+    password,
+  });
+
+  const { token, username: user, role } = res.data;
+
+  // Store auth data
+  localStorage.setItem("token", token);
+  localStorage.setItem(
+    "user",
+    JSON.stringify({ username: user, role })
+  );
+
+  return res.data;
+};
+
+export const logoutUser = () => {
+  localStorage.removeItem("token");
+  localStorage.removeItem("user");
+
+  if (typeof window !== "undefined") {
+    window.location.href = "/login";
+  }
+};
+
+export const getCurrentUser = async () => {
+  return api.get("/me");
+};
+
+// =====================================================
+// 🔎 QUERY API
+// =====================================================
+export const queryCode = async (question, repoPath) => {
+  return api.post("/query", {
+    question,
+    repo_path: repoPath,
+  });
+};
+
+// =====================================================
+// 📦 INDEX API
+// =====================================================
+export const indexRepo = async (repoPath, indexPath) => {
+  return api.post("/index", {
+    repo_path: repoPath,
+    index_path: indexPath,
+  });
+};
+
+// =====================================================
+// ❤️ HEALTH CHECK
+// =====================================================
+export const healthCheck = async () => {
+  return api.get("/health");
+};
+
+// =====================================================
+// DEFAULT EXPORT
+// =====================================================
+export default api;

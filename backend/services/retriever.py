@@ -4,8 +4,8 @@ import numpy as np
 from redisvl.query import VectorQuery
 from sentence_transformers import SentenceTransformer
 
-from ..utils.redis_utils import get_index
-from ..core.logger import setup_logger
+from utils.redis_utils import get_index
+from core.logger import setup_logger
 
 # -----------------------------------------------------------------------------
 # Setup

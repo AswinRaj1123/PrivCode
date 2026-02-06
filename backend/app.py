@@ -7,10 +7,10 @@ from fastapi import FastAPI, HTTPException, Depends, Header, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from backend.services.privcode import query_rag
-from backend.services.indexer import incremental_index
-from backend.core.logger import setup_logger
-from backend.core.auth import (
+from services.privcode import rag_query
+from services.indexer import incremental_index
+from core.logger import setup_logger
+from core.auth import (
     authenticate_user,
     create_token,
     verify_token,
@@ -190,7 +190,7 @@ def query(
     current_user: dict = Depends(get_current_user),
 ):
     try:
-        response = query_rag(req.question)
+        response = rag_query(req.question)
 
         logger.info(
             "User %s queried: %s",
@@ -244,7 +244,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "backend.app:app",
+        "app:app",
         host="0.0.0.0",
         port=8000,
         reload=True,

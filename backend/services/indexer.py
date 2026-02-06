@@ -8,9 +8,9 @@ from git import Repo
 from tqdm import tqdm
 from sentence_transformers import SentenceTransformer
 
-from ..utils.redis_utils import get_index
-from ..utils.ast_parser import extract_ast_metadata
-from ..core.logger import setup_logger
+from utils.redis_utils import get_index
+from utils.ast_parser import extract_ast_metadata
+from core.logger import setup_logger
 
 # -----------------------------------------------------------------------------
 # Setup
