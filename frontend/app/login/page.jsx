@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { loginUser } from "@/lib/api";
 import { auth } from "@/lib/auth";
-import { Lock, User, Eye, EyeOff, Loader2, Code2, ArrowRight, Shield } from "lucide-react";
+import { Lock, User, Eye, EyeOff, Loader2, ArrowRight, Terminal, ShieldCheck, Wifi, WifiOff } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -32,191 +32,199 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white flex">
-      {/* LEFT SIDE - BRANDING & FEATURES */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-slate-900 via-slate-800 to-gray-900 text-white flex-col justify-between p-12">
+    <div className="min-h-screen bg-pc-bg flex">
+      {/* LEFT PANEL — Branding */}
+      <div className="hidden lg:flex lg:w-[480px] xl:w-[520px] bg-pc-surface border-r border-pc-border flex-col justify-between p-10">
         {/* Logo */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg flex items-center justify-center">
-            <Code2 size={24} />
+          <div className="w-9 h-9 border-2 border-pc-accent rounded flex items-center justify-center">
+            <span className="font-mono text-pc-accent text-sm font-semibold">&gt;_</span>
           </div>
-          <h1 className="text-2xl font-bold">PrivCode</h1>
+          <span className="text-lg font-semibold text-pc-text tracking-tight">PrivCode</span>
         </div>
 
-        {/* Features */}
-        <div className="space-y-8">
+        {/* Center content */}
+        <div className="space-y-10">
           <div>
-            <h2 className="text-4xl font-bold leading-tight mb-8">
-              Private Code Intelligence at Your Fingertips
+            <h2 className="text-3xl font-semibold text-pc-text leading-tight mb-3">
+              Private code intelligence.
             </h2>
-            <p className="text-gray-400 text-lg">
-              Analyze your codebase securely, offline, and completely private.
+            <p className="text-pc-secondary text-base leading-relaxed">
+              Analyze your codebase with AI — fully offline, end-to-end encrypted, zero cloud dependencies.
             </p>
           </div>
 
-          <div className="space-y-6">
-            {/* Feature 1 */}
-            <div className="flex gap-4">
-              <div className="w-12 h-12 bg-purple-500/20 rounded-lg flex items-center justify-center flex-shrink-0 mt-1">
-                <Shield size={24} className="text-purple-400" />
+          <div className="space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded bg-pc-elevated border border-pc-border flex items-center justify-center flex-shrink-0 mt-0.5">
+                <WifiOff size={16} className="text-pc-accent" />
               </div>
               <div>
-                <h3 className="font-semibold text-lg mb-1">100% Offline</h3>
-                <p className="text-gray-400">Your code never leaves your machine. Complete privacy guaranteed.</p>
+                <p className="text-sm font-medium text-pc-text mb-0.5">Air-gapped operation</p>
+                <p className="text-sm text-pc-muted">No internet required. Your code stays on your machine.</p>
               </div>
             </div>
 
-            {/* Feature 2 */}
-            <div className="flex gap-4">
-              <div className="w-12 h-12 bg-indigo-500/20 rounded-lg flex items-center justify-center flex-shrink-0 mt-1">
-                <Code2 size={24} className="text-indigo-400" />
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded bg-pc-elevated border border-pc-border flex items-center justify-center flex-shrink-0 mt-0.5">
+                <ShieldCheck size={16} className="text-pc-success" />
               </div>
               <div>
-                <h3 className="font-semibold text-lg mb-1">Code Analysis</h3>
-                <p className="text-gray-400">Get instant insights about bugs, security issues, and improvements.</p>
+                <p className="text-sm font-medium text-pc-text mb-0.5">Encrypted at rest</p>
+                <p className="text-sm text-pc-muted">Redis, indexes, and audit logs all Fernet-encrypted.</p>
               </div>
             </div>
 
-            {/* Feature 3 */}
-            <div className="flex gap-4">
-              <div className="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center flex-shrink-0 mt-1">
-                <Loader2 size={24} className="text-blue-400" />
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded bg-pc-elevated border border-pc-border flex items-center justify-center flex-shrink-0 mt-0.5">
+                <Terminal size={16} className="text-pc-warning" />
               </div>
               <div>
-                <h3 className="font-semibold text-lg mb-1">Zero Cloud</h3>
-                <p className="text-gray-400">No cloud storage, no tracking, no dependencies on external services.</p>
+                <p className="text-sm font-medium text-pc-text mb-0.5">Local LLM + RAG</p>
+                <p className="text-sm text-pc-muted">Llama 3 running locally with hybrid vector retrieval.</p>
               </div>
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <p className="text-gray-500 text-sm">
-          © 2026 PrivCode. Secure code intelligence for everyone.
-        </p>
+        <div className="flex items-center gap-2 text-pc-muted text-xs">
+          <div className="w-1.5 h-1.5 rounded-full bg-pc-success" />
+          System online &middot; v1.0
+        </div>
       </div>
 
-      {/* RIGHT SIDE - LOGIN FORM */}
-      <div className="w-full lg:w-1/2 flex flex-col justify-center px-6 sm:px-12 py-12 bg-white">
-        <div className="max-w-md mx-auto w-full">
+      {/* RIGHT PANEL — Login Form */}
+      <div className="flex-1 flex flex-col justify-center px-6 sm:px-12 lg:px-16">
+        <div className="max-w-sm mx-auto w-full">
           {/* Mobile Logo */}
-          <div className="lg:hidden flex items-center gap-2 mb-8">
-            <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg flex items-center justify-center">
-              <Code2 size={20} className="text-white" />
+          <div className="lg:hidden flex items-center gap-2 mb-10">
+            <div className="w-8 h-8 border-2 border-pc-accent rounded flex items-center justify-center">
+              <span className="font-mono text-pc-accent text-xs font-semibold">&gt;_</span>
             </div>
-            <h1 className="text-xl font-bold text-gray-900">PrivCode</h1>
+            <span className="text-lg font-semibold text-pc-text">PrivCode</span>
           </div>
 
           {/* Header */}
           <div className="mb-8">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">Welcome back</h2>
-            <p className="text-gray-600">Sign in to access your private code intelligence.</p>
+            <h2 className="text-xl font-semibold text-pc-text mb-1">Sign in</h2>
+            <p className="text-sm text-pc-secondary">Authenticate to access the code intelligence dashboard.</p>
           </div>
 
-          {/* Error Message */}
+          {/* Error */}
           {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-red-700 text-sm font-medium">{error}</p>
+            <div className="mb-5 px-3 py-2.5 bg-[rgba(248,81,73,0.1)] border border-pc-danger/30 rounded text-sm text-pc-danger">
+              {error}
             </div>
           )}
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4 mb-6">
-            {/* Username */}
             <div>
-              <label htmlFor="username" className="block text-sm font-medium text-gray-900 mb-2">
+              <label htmlFor="username" className="block text-xs font-medium text-pc-secondary mb-1.5 uppercase tracking-wider">
                 Username
               </label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pc-muted" />
                 <input
                   id="username"
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Enter your username"
+                  placeholder="Enter username"
                   required
-                  className="w-full pl-11 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition text-gray-900 placeholder-gray-500"
+                  autoComplete="username"
+                  className="w-full pl-10 pr-4 py-2.5 bg-pc-surface border border-pc-border rounded text-sm text-pc-text placeholder-pc-muted focus:outline-none focus:border-pc-accent focus:ring-1 focus:ring-pc-accent/50 transition"
                 />
               </div>
             </div>
 
-            {/* Password */}
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-900 mb-2">
+              <label htmlFor="password" className="block text-xs font-medium text-pc-secondary mb-1.5 uppercase tracking-wider">
                 Password
               </label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pc-muted" />
                 <input
                   id="password"
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
+                  placeholder="Enter password"
                   required
-                  className="w-full pl-11 pr-12 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition text-gray-900 placeholder-gray-500"
+                  autoComplete="current-password"
+                  className="w-full pl-10 pr-10 py-2.5 bg-pc-surface border border-pc-border rounded text-sm text-pc-text placeholder-pc-muted focus:outline-none focus:border-pc-accent focus:ring-1 focus:ring-pc-accent/50 transition"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-pc-muted hover:text-pc-secondary transition"
                 >
-                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
             </div>
 
-            {/* Submit Button */}
             <button
               type="submit"
               disabled={loading}
-              className="w-full mt-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-medium rounded-lg hover:from-purple-700 hover:to-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full mt-2 py-2.5 bg-pc-accent hover:bg-pc-accent-hover text-[#0d1117] font-medium text-sm rounded transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>
-                  <Loader2 size={20} className="animate-spin" />
-                  Signing in...
+                  <Loader2 size={16} className="animate-spin" />
+                  Authenticating...
                 </>
               ) : (
                 <>
-                  Continue
-                  <ArrowRight size={20} />
+                  Sign in
+                  <ArrowRight size={16} />
                 </>
               )}
             </button>
           </form>
 
-          {/* Divider */}
+          {/* Separator */}
           <div className="relative my-6">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-300"></div>
+              <div className="w-full border-t border-pc-border" />
             </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="px-2 bg-white text-gray-500">Default Credentials</span>
-            </div>
-          </div>
-
-          {/* Demo Credentials */}
-          <div className="grid grid-cols-2 gap-4 mb-8">
-            <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
-              <p className="text-xs text-blue-600 font-semibold mb-2">ADMIN</p>
-              <p className="text-sm text-blue-900 font-mono break-all">admin</p>
-              <p className="text-xs text-blue-700 font-mono mt-1">admin123</p>
-            </div>
-            <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <p className="text-xs text-gray-600 font-semibold mb-2">VIEWER</p>
-              <p className="text-sm text-gray-900 font-mono break-all">viewer</p>
-              <p className="text-xs text-gray-700 font-mono mt-1">viewer123</p>
+            <div className="relative flex justify-center">
+              <span className="px-3 bg-pc-bg text-pc-muted text-xs uppercase tracking-wider">Credentials</span>
             </div>
           </div>
 
-          {/* Footer Text */}
-          <p className="text-xs text-gray-500 text-center">
-            By signing in, you agree to our Terms of Service and Privacy Policy.
-          </p>
+          {/* Credential Cards */}
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => { setUsername("admin"); setPassword("admin123"); }}
+              className="p-3 bg-pc-surface border border-pc-border rounded hover:border-pc-accent/50 transition text-left group"
+            >
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-pc-success" />
+                <span className="text-[10px] text-pc-muted font-medium uppercase tracking-wider">Admin</span>
+              </div>
+              <p className="font-mono text-xs text-pc-text">admin</p>
+              <p className="font-mono text-[10px] text-pc-muted mt-0.5">admin123</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setUsername("developer"); setPassword("dev123"); }}
+              className="p-3 bg-pc-surface border border-pc-border rounded hover:border-pc-accent/50 transition text-left group"
+            >
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-pc-secondary" />
+                <span className="text-[10px] text-pc-muted font-medium uppercase tracking-wider">Developer</span>
+              </div>
+              <p className="font-mono text-xs text-pc-text">developer</p>
+              <p className="font-mono text-[10px] text-pc-muted mt-0.5">dev123</p>
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+

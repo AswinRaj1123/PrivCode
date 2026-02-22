@@ -108,10 +108,11 @@ export const getCurrentUser = async () => {
 // =====================================================
 // 🔎 QUERY API
 // =====================================================
-export const queryCode = async (question, repoPath) => {
+export const queryCode = async (question, repoPath, mode = "auto") => {
   return api.post("/query", {
     question,
     repo_path: repoPath,
+    mode,
   });
 };
 
@@ -123,6 +124,24 @@ export const indexRepo = async (repoPath, indexPath) => {
     repo_path: repoPath,
     index_path: indexPath,
   });
+};
+
+// =====================================================
+// 🚪 LOGOUT API
+// =====================================================
+export const logoutSession = async () => {
+  try {
+    await api.post("/logout");
+  } catch {
+    // swallow — server may already be down
+  }
+};
+
+// =====================================================
+// 📊 ADMIN: Developer Activity
+// =====================================================
+export const getDevActivity = async () => {
+  return api.get("/admin/activity");
 };
 
 // =====================================================

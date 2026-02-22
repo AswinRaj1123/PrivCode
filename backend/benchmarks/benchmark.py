@@ -34,7 +34,7 @@ def run_benchmarks():
 
     print("📦 Running incremental indexing...")
     index_start = time.time()
-    incremental_index(REPO_PATH, INDEX_PATH)
+    incremental_index(REPO_PATH)
     index_time = time.time() - index_start
 
     logger.info("Index time: %.2fs", index_time)
@@ -169,7 +169,7 @@ def run_benchmarks():
 
     print("📦 Running incremental indexing...")
     index_start = time.time()
-    incremental_index(REPO_PATH, INDEX_PATH)
+    incremental_index(REPO_PATH)
     index_time = time.time() - index_start
 
     logger.info("Index time: %.2fs", index_time)

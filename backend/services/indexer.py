@@ -1,14 +1,16 @@
 import json
 import os
+import re
 import hashlib
+import shutil
 import numpy as np
 from pathlib import Path
+from urllib.parse import urlparse
 
-from git import Repo
+from git import Repo, GitCommandError
 from tqdm import tqdm
-from sentence_transformers import SentenceTransformer
 
-from utils.redis_utils import get_index
+from utils.redis_utils import get_index, get_embedder
 from utils.ast_parser import extract_ast_metadata
 from core.logger import setup_logger
 
@@ -20,6 +22,7 @@ logger = setup_logger()
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 REPO_PATH = ROOT_DIR / "test_repo"
+REPOS_DIR = ROOT_DIR / "repos"          # cloned remote repos live here
 METADATA_FILE = ".privcode_metadata.json"
 
 CODE_EXTENSIONS = {".py", ".js", ".java", ".ts", ".cpp", ".c", ".go", ".jsx", ".tsx"}
@@ -27,13 +30,6 @@ SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv", "build"}
 
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
-
-# Redis index
-index = get_index()
-
-# Embedding model (same one used in redis_utils)
-logger.info("🧠 Loading embedding model...")
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
 # -----------------------------------------------------------------------------
 # Metadata helpers (Git incremental indexing)
@@ -83,7 +79,7 @@ def index_file(file_path: Path, repo_root: Path):
 
     for i, chunk in enumerate(chunks):
         vector = np.array(
-            embedder.encode(chunk),
+            get_embedder().encode(chunk),
             dtype=np.float32
         ).tobytes()
         ast_metadata = extract_ast_metadata(chunk, str(rel_path))
@@ -101,7 +97,7 @@ def index_file(file_path: Path, repo_root: Path):
             "language": language,
         }
 
-        index.load([payload], keys=[doc_id])
+        get_index().load([payload], keys=[doc_id])
 
     logger.info("📄 Indexed %s (%d chunks)", rel_path, len(chunks))
 
@@ -128,12 +124,72 @@ def build_full_index(repo_path: Path):
 
 
 # -----------------------------------------------------------------------------
+# Remote URL detection + clone / pull
+# -----------------------------------------------------------------------------
+
+_GIT_URL_RE = re.compile(
+    r"^(https?://|git@|ssh://)",
+    re.IGNORECASE,
+)
+
+
+def _is_git_url(path_or_url: str) -> bool:
+    """Return True if the string looks like a remote Git URL."""
+    return bool(_GIT_URL_RE.match(path_or_url.strip()))
+
+
+def _repo_dir_name(url: str) -> str:
+    """Derive a clean folder name from a Git URL."""
+    parsed = urlparse(url.strip().rstrip("/"))
+    # e.g. github.com/user/repo.git → user_repo
+    path = parsed.path.lstrip("/").removesuffix(".git")
+    return path.replace("/", "_").replace("\\", "_")
+
+
+def resolve_repo_path(path_or_url: str) -> Path:
+    """
+    If *path_or_url* is a remote Git URL, clone it (or pull if already cloned)
+    into REPOS_DIR and return the local path.  Otherwise treat it as a local
+    path and return as-is.
+    """
+    if not _is_git_url(path_or_url):
+        return Path(path_or_url).expanduser().resolve()
+
+    url = path_or_url.strip()
+    dest = REPOS_DIR / _repo_dir_name(url)
+    REPOS_DIR.mkdir(parents=True, exist_ok=True)
+
+    if dest.exists() and (dest / ".git").is_dir():
+        # Already cloned — pull latest changes
+        logger.info("🔄 Pulling latest from %s ...", url)
+        try:
+            repo = Repo(str(dest))
+            origin = repo.remotes.origin
+            origin.pull()
+            logger.info("✅ Pull complete for %s", dest.name)
+        except GitCommandError as exc:
+            logger.warning("⚠️ Pull failed (%s). Using existing clone.", exc)
+    else:
+        # Fresh clone
+        if dest.exists():
+            shutil.rmtree(dest)          # remove stale non-git dir
+        logger.info("📥 Cloning %s → %s ...", url, dest)
+        Repo.clone_from(url, str(dest))
+        logger.info("✅ Clone complete: %s", dest.name)
+
+    return dest
+
+
+# -----------------------------------------------------------------------------
 # Incremental indexing (Git-aware)
 # -----------------------------------------------------------------------------
 
-def incremental_index(repo_path: Path):
+def incremental_index(repo_path_or_url):
+    # Resolve remote URLs to local clones; local paths pass through unchanged
+    repo_path = resolve_repo_path(str(repo_path_or_url))
+
     try:
-        repo = Repo(repo_path)
+        repo = Repo(str(repo_path))
         current_commit = repo.head.commit.hexsha
     except Exception as exc:
         logger.warning("⚠️ Git error (%s). Running full index.", exc)

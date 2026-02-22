@@ -60,7 +60,8 @@ STRICT RULES (VERY IMPORTANT):
 - Use ONLY the provided code context.
 - Do NOT guess or hallucinate.
 - If the answer is not in the context, say "Not found in the provided code."
-- Do NOT use markdown.
+- Wrap any code snippets inside the explanation or suggestions in triple-backtick fences with the language name.
+- Do NOT use any other markdown formatting.
 - Output ONLY ONE JSON object.
 - Output must start with '{{' and end with '}}'.
 
@@ -131,7 +132,7 @@ def extract_first_valid_json(text: str) -> Dict:
 # -----------------------------------------------------------------------------
 
 def rag_query(query: str, top_k: int = 3) -> Dict:
-    logger.info("🔍 Retrieving context for query: %s", query)
+    logger.info("Retrieving context for query: %s", query)
     contexts = hybrid_retrieve(query, top_k=top_k)
 
     if not contexts:
@@ -139,7 +140,7 @@ def rag_query(query: str, top_k: int = 3) -> Dict:
 
     prompt = build_augmented_prompt(query, contexts)
 
-    logger.info("🧠 Generating response with LLM...")
+    logger.info("Generating response with LLM...")
     
     try:
         model = get_llm()
@@ -168,15 +169,113 @@ def rag_query(query: str, top_k: int = 3) -> Dict:
             sorted({ctx["file_path"] for ctx in contexts})
         )
 
-        logger.info("✅ LLM response parsed successfully")
+        logger.info("RAG response parsed successfully")
         return parsed
 
     except Exception as exc:
-        logger.error("❌ Failed to parse LLM output: %s", exc)
+        logger.error("Failed to parse LLM output: %s", exc)
         return {
             "error": "Failed to parse LLM output",
             "raw_output": raw_text,
         }
+
+
+# -----------------------------------------------------------------------------
+# General Query (no RAG — direct LLM)
+# -----------------------------------------------------------------------------
+
+GENERAL_PROMPT_TEMPLATE = """You are an expert software engineer assistant.
+Answer the developer's question clearly and concisely.
+If they ask for code, provide working code with brief explanations.
+Wrap all code snippets in triple-backtick fences with the language name, for example:
+```python
+print("hello")
+```
+Do NOT use any other markdown formatting (no headers, bold, italic, lists with *).
+Keep responses focused and practical.
+
+Developer Question:
+{query}
+
+Answer:
+"""
+
+
+def general_query(query: str) -> Dict:
+    """Send query directly to LLM without RAG retrieval."""
+    logger.info("General query (no RAG): %s", query)
+
+    try:
+        model = get_llm()
+    except FileNotFoundError as e:
+        logger.error(str(e))
+        return {"error": "LLM model not available", "message": str(e)}
+
+    prompt = GENERAL_PROMPT_TEMPLATE.format(query=query)
+
+    response = model(
+        prompt,
+        max_tokens=512,
+        temperature=0.3,
+        top_p=0.9,
+    )
+
+    raw_text = response["choices"][0]["text"].strip()
+    logger.info("General query response generated")
+
+    return {
+        "summary": "",
+        "explanation": raw_text,
+        "bugs_found": [],
+        "suggestions": [],
+        "sources": [],
+    }
+
+
+# -----------------------------------------------------------------------------
+# Auto Query (try RAG first, fall back to general)
+# -----------------------------------------------------------------------------
+
+def auto_query(query: str, top_k: int = 3) -> Dict:
+    """Try RAG first; if no relevant code found, fall back to general LLM."""
+    logger.info("Auto query: %s", query)
+    contexts = hybrid_retrieve(query, top_k=top_k)
+
+    if contexts:
+        # RAG path — we have relevant code
+        logger.info("Auto mode: found %d code chunks, using RAG", len(contexts))
+        prompt = build_augmented_prompt(query, contexts)
+
+        try:
+            model = get_llm()
+        except FileNotFoundError as e:
+            logger.error(str(e))
+            return {"error": "LLM model not available", "message": str(e)}
+
+        response = model(
+            prompt,
+            max_tokens=256,
+            temperature=0.1,
+            top_p=0.9,
+        )
+
+        raw_text = response["choices"][0]["text"].strip()
+
+        try:
+            parsed = extract_first_valid_json(raw_text)
+            parsed["sources"] = list(sorted({ctx["file_path"] for ctx in contexts}))
+            parsed["mode"] = "repo"
+            logger.info("Auto mode: RAG response parsed")
+            return parsed
+        except Exception as exc:
+            logger.error("Failed to parse RAG output: %s", exc)
+            return {"error": "Failed to parse LLM output", "raw_output": raw_text}
+    else:
+        # General path — no relevant code
+        logger.info("Auto mode: no relevant code, falling back to general")
+        result = general_query(query)
+        result["mode"] = "general"
+        return result
 
 # -----------------------------------------------------------------------------
 # CLI Entry

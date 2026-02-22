@@ -30,7 +30,26 @@ fn main() {
         .expect("error while running tauri application");
 }
 
+fn is_backend_running() -> bool {
+    // Quick health-check: if backend is already up, skip starting it again.
+    match std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:8000".parse().unwrap(),
+        std::time::Duration::from_secs(2),
+    ) {
+        Ok(_) => {
+            eprintln!("[PrivCode] Backend already running on port 8000 — skipping start");
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 fn start_backend() {
+    // If the backend is already running (started via python main.py), skip.
+    if is_backend_running() {
+        return;
+    }
+
     // Spawn FastAPI backend in background
     std::thread::spawn(|| {
         // Navigate to repo root from executable location
@@ -47,12 +66,11 @@ fn start_backend() {
                 if let Some(repo) = repo_root {
                     let python_exe = repo.join("venv").join("Scripts").join("python.exe");
                     match Command::new(&python_exe)
-                        .arg("-m")
-                        .arg("backend.app")
+                        .arg("main.py")
                         .current_dir(repo)
                         .spawn()
                     {
-                        Ok(_) => eprintln!("[PrivCode] FastAPI backend started"),
+                        Ok(_) => eprintln!("[PrivCode] FastAPI backend started via main.py"),
                         Err(e) => eprintln!("[PrivCode] Failed to start backend: {}", e),
                     }
                 } else {

@@ -97,7 +97,7 @@ def test_authenticated_user_info():
     # First login
     login_response = client.post(
         "/login",
-        json={"username": "viewer", "password": "viewer123"}
+        json={"username": "developer", "password": "dev123"}
     )
     assert login_response.status_code == 200
     token = login_response.json()["token"]
@@ -109,23 +109,23 @@ def test_authenticated_user_info():
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["username"] == "viewer"
-    assert data["role"] == "viewer"
+    assert data["username"] == "developer"
+    assert data["role"] == "developer"
 
 
 # =====================================================
 # ROLE-BASED ACCESS TESTS
 # =====================================================
 
-def test_viewer_login():
-    """Test viewer user login."""
+def test_developer_login():
+    """Test developer user login."""
     response = client.post(
         "/login",
-        json={"username": "viewer", "password": "viewer123"}
+        json={"username": "developer", "password": "dev123"}
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["role"] == "viewer"
+    assert data["role"] == "developer"
 
 
 def test_admin_login():

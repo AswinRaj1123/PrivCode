@@ -2,9 +2,8 @@ import json
 import numpy as np
 
 from redisvl.query import VectorQuery
-from sentence_transformers import SentenceTransformer
 
-from utils.redis_utils import get_index
+from utils.redis_utils import get_index, get_embedder
 from core.logger import setup_logger
 
 # -----------------------------------------------------------------------------
@@ -14,10 +13,6 @@ from core.logger import setup_logger
 logger = setup_logger()
 
 TOP_K = 5
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-
-embedder = SentenceTransformer(EMBEDDING_MODEL)
-index = get_index()
 
 # -----------------------------------------------------------------------------
 # Hybrid Retrieval (Redis-native)
@@ -37,7 +32,7 @@ def hybrid_retrieve(
 
     # Encode query -> float32 bytes (MUST match indexer)
     query_vector = np.array(
-        embedder.encode(query),
+        get_embedder().encode(query),
         dtype=np.float32
     ).tobytes()
 
@@ -60,7 +55,7 @@ def hybrid_retrieve(
         vq.set_filter("language", language_filter)
 
     # Execute Redis query
-    results = index.query(vq)
+    results = get_index().query(vq)
 
     formatted = []
     for r in results:

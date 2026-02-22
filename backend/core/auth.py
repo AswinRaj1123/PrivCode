@@ -18,7 +18,7 @@ from core.config import (
 import jwt
 
 ROLES = {
-    "viewer": "view_only",
+    "developer": "view_only",
     "admin": "full_access",
 }
 
@@ -32,7 +32,7 @@ def _initialize_users():
         },
         VIEWER_USERNAME: {
             "password_hash": hashlib.sha256(VIEWER_PASSWORD.encode()).hexdigest(),
-            "role": "viewer",
+            "role": "developer",
         },
     }
 

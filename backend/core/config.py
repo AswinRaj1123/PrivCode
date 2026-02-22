@@ -46,8 +46,8 @@ JWT_EXPIRATION_HOURS = int(_get_optional_env("JWT_EXPIRATION_HOURS", "24"))
 ADMIN_USERNAME = _get_required_env("ADMIN_USERNAME", "Admin username")
 ADMIN_PASSWORD = _get_required_env("ADMIN_PASSWORD", "Admin password")
 
-VIEWER_USERNAME = _get_required_env("VIEWER_USERNAME", "Viewer username")
-VIEWER_PASSWORD = _get_required_env("VIEWER_PASSWORD", "Viewer password")
+VIEWER_USERNAME = _get_required_env("VIEWER_USERNAME", "Developer username")
+VIEWER_PASSWORD = _get_required_env("VIEWER_PASSWORD", "Developer password")
 
 # =====================================================
 # REDIS CONFIGURATION
