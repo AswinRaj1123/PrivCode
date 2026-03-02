@@ -247,6 +247,7 @@ export default function ChatPage() {
   }, [messages]);
 
   const isAdmin = user?.role === "admin";
+  const isManager = user?.role === "manager";
 
   // ── Actions ──
   const handleLogout = async () => {
@@ -480,7 +481,17 @@ export default function ChatPage() {
               className="w-full px-3 py-2 bg-pc-elevated border border-pc-border rounded text-xs text-pc-secondary hover:text-pc-text hover:bg-pc-hover transition flex items-center gap-2"
             >
               <Users size={13} />
-              Developer Activity
+              Admin Dashboard
+              <Activity size={12} className="ml-auto" />
+            </button>
+          )}
+          {isManager && (
+            <button
+              onClick={() => router.push("/manager")}
+              className="w-full px-3 py-2 bg-pc-elevated border border-pc-border rounded text-xs text-pc-secondary hover:text-pc-text hover:bg-pc-hover transition flex items-center gap-2"
+            >
+              <Users size={13} />
+              Team Dashboard
               <Activity size={12} className="ml-auto" />
             </button>
           )}
@@ -494,7 +505,7 @@ export default function ChatPage() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs text-pc-text truncate">{user?.username}</p>
-              <p className="text-[10px] text-pc-muted">{isAdmin ? "admin" : "developer"}</p>
+              <p className="text-[10px] text-pc-muted">{user?.role || "developer"}</p>
             </div>
           </div>
           <button

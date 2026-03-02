@@ -219,6 +219,31 @@ export const getSystemPerformance = async () => {
 };
 
 // =====================================================
+// 👔 MANAGER: Team Dashboard
+// =====================================================
+export const getTeamMembers = async () => {
+  return api.get("/manager/team/members");
+};
+
+export const getQueryHistory = async (username = null, limit = 50) => {
+  const params = { limit };
+  if (username) params.username = username;
+  return api.get("/manager/team/query-history", { params });
+};
+
+export const getUsageAnalytics = async () => {
+  return api.get("/manager/team/analytics");
+};
+
+export const getActivityReport = async () => {
+  return api.get("/manager/team/activity-report");
+};
+
+export const getProjectDocs = async () => {
+  return api.get("/manager/docs/project");
+};
+
+// =====================================================
 // ❤️ HEALTH CHECK
 // =====================================================
 export const healthCheck = async () => {

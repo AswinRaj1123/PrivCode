@@ -5,6 +5,7 @@ import os
 import time
 import json
 import psutil
+from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, List
@@ -38,6 +39,9 @@ from core.activity import (
     record_heartbeat,
     get_all_activity,
     get_user_activity,
+    get_developers_activity,
+    get_developer_query_history,
+    get_usage_analytics,
 )
 
 # 🔹 Security Policies (in-memory store, persists until restart)
@@ -367,15 +371,17 @@ def query(
             response_summary=str(response)[:200],
         )
 
-        # Track query
-        record_query(current_user["username"], req.question, mode, "SUCCESS")
+        # Track query (with response for manager view)
+        record_query(current_user["username"], req.question, mode, "SUCCESS",
+                     response_summary=str(response)[:300])
 
         return {"response": response}
 
     except Exception as e:  # noqa: BLE001
         logger.exception("Query failed")
 
-        record_query(current_user["username"], req.question, (req.mode or "auto"), "ERROR")
+        record_query(current_user["username"], req.question, (req.mode or "auto"), "ERROR",
+                     response_summary=None)
 
         # ❌ Failure Log
         log_action(
@@ -443,6 +449,124 @@ def admin_user_activity(username: str, current_user: dict = Depends(get_current_
     if not data:
         raise HTTPException(status_code=404, detail="User not found in activity log")
     return data
+
+
+# =========================================================
+# 👔 MANAGER: Team Dashboard Endpoints
+# =========================================================
+
+def _require_manager_or_admin(current_user: dict):
+    """Helper: raise 403 if not manager or admin."""
+    if current_user["role"] not in ("manager", "admin"):
+        raise HTTPException(status_code=403, detail="Manager or admin access required")
+
+
+@app.get("/manager/team/members")
+def manager_team_members(current_user: dict = Depends(get_current_user)):
+    """View team members (developers) and their activity summary."""
+    _require_manager_or_admin(current_user)
+    developers = get_developers_activity()
+    return {"members": developers, "total": len(developers)}
+
+
+@app.get("/manager/team/query-history")
+def manager_query_history(
+    username: Optional[str] = None,
+    limit: int = 50,
+    current_user: dict = Depends(get_current_user),
+):
+    """View developers' query history with responses."""
+    _require_manager_or_admin(current_user)
+    history = get_developer_query_history(username=username, limit=limit)
+    return {"history": history, "total": len(history)}
+
+
+@app.get("/manager/team/analytics")
+def manager_usage_analytics(current_user: dict = Depends(get_current_user)):
+    """Get developer usage analytics (mode distribution, top users, etc.)."""
+    _require_manager_or_admin(current_user)
+    analytics = get_usage_analytics()
+    return analytics
+
+
+@app.get("/manager/team/activity-report")
+def manager_activity_report(current_user: dict = Depends(get_current_user)):
+    """Comprehensive activity report for all developers."""
+    _require_manager_or_admin(current_user)
+    developers = get_developers_activity()
+
+    report = {
+        "generated_at": datetime.utcnow().isoformat() if True else "",
+        "summary": {
+            "total_developers": len(developers),
+            "online": sum(1 for d in developers if d.get("status") == "online"),
+            "offline": sum(1 for d in developers if d.get("status") != "online"),
+            "total_queries": sum(d.get("total_queries", 0) for d in developers),
+            "total_indexing": sum(d.get("total_indexing", 0) for d in developers),
+        },
+        "developers": [],
+    }
+
+    for dev in developers:
+        recent = dev.get("recent_queries", [])
+        success_count = sum(1 for q in recent if q.get("status") == "SUCCESS")
+        error_count = sum(1 for q in recent if q.get("status") != "SUCCESS")
+        modes_used = list(set(q.get("mode", "") for q in recent))
+
+        report["developers"].append({
+            "username": dev["username"],
+            "status": dev.get("status", "offline"),
+            "total_queries": dev.get("total_queries", 0),
+            "total_indexing": dev.get("total_indexing", 0),
+            "success_rate": round(success_count / len(recent) * 100, 1) if recent else 0,
+            "error_count": error_count,
+            "modes_used": modes_used,
+            "last_active": dev.get("last_active"),
+            "last_login": dev.get("last_login"),
+            "current_repo": dev.get("current_repo"),
+        })
+
+    return report
+
+
+@app.get("/manager/docs/project")
+def manager_project_docs(current_user: dict = Depends(get_current_user)):
+    """Access project documentation files from the indexed repository."""
+    _require_manager_or_admin(current_user)
+
+    docs = []
+    doc_extensions = {".md", ".rst", ".txt", ".adoc"}
+    doc_names = {"readme", "contributing", "changelog", "license", "authors",
+                 "docs", "documentation", "guide", "api", "todo", "notes"}
+
+    try:
+        from git import Repo as GitRepo
+        repo = GitRepo(str(REPO_PATH))
+        tree = repo.head.commit.tree
+
+        def _walk_tree(tree_obj, prefix=""):
+            for blob in tree_obj.blobs:
+                name_lower = blob.name.lower()
+                stem = name_lower.rsplit(".", 1)[0] if "." in name_lower else name_lower
+                ext = ("." + name_lower.rsplit(".", 1)[1]) if "." in name_lower else ""
+                if ext in doc_extensions or stem in doc_names:
+                    try:
+                        content = blob.data_stream.read().decode("utf-8", errors="replace")
+                    except Exception:
+                        content = "(binary or unreadable)"
+                    docs.append({
+                        "path": f"{prefix}{blob.name}",
+                        "size": blob.size,
+                        "content": content[:5000],  # cap at 5 KB
+                    })
+            for subtree in tree_obj.trees:
+                _walk_tree(subtree, prefix=f"{prefix}{subtree.name}/")
+
+        _walk_tree(tree)
+    except Exception as exc:
+        return {"docs": [], "error": str(exc)}
+
+    return {"docs": docs, "total": len(docs)}
 
 
 # =========================================================
