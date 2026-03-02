@@ -248,6 +248,7 @@ export default function ChatPage() {
 
   const isAdmin = user?.role === "admin";
   const isManager = user?.role === "manager";
+  const isAuditor = user?.role === "auditor";
 
   // ── Actions ──
   const handleLogout = async () => {
@@ -492,6 +493,16 @@ export default function ChatPage() {
             >
               <Users size={13} />
               Team Dashboard
+              <Activity size={12} className="ml-auto" />
+            </button>
+          )}
+          {isAuditor && (
+            <button
+              onClick={() => router.push("/auditor")}
+              className="w-full px-3 py-2 bg-pc-elevated border border-pc-border rounded text-xs text-pc-secondary hover:text-pc-text hover:bg-pc-hover transition flex items-center gap-2"
+            >
+              <Users size={13} />
+              Security Audit
               <Activity size={12} className="ml-auto" />
             </button>
           )}

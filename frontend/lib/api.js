@@ -244,6 +244,25 @@ export const getProjectDocs = async () => {
 };
 
 // =====================================================
+// 🔍 AUDITOR: Security Dashboard
+// =====================================================
+export const getAuditorAuditLogs = async () => {
+  return api.get("/auditor/audit-logs");
+};
+
+export const getAccessAttempts = async (limit = 100) => {
+  return api.get("/auditor/access-attempts", { params: { limit } });
+};
+
+export const getPolicyViolations = async (limit = 100) => {
+  return api.get("/auditor/policy-violations", { params: { limit } });
+};
+
+export const getSecurityReport = async () => {
+  return api.get("/auditor/security-report");
+};
+
+// =====================================================
 // ❤️ HEALTH CHECK
 // =====================================================
 export const healthCheck = async () => {

@@ -588,6 +588,7 @@ export default function AdminPage() {
                       <select value={newRole} onChange={(e) => setNewRole(e.target.value)} className="w-full px-3 py-1.5 bg-pc-bg border border-pc-border rounded text-xs font-mono text-pc-text focus:outline-none focus:border-pc-accent transition">
                         <option value="developer">developer</option>
                         <option value="manager">manager</option>
+                        <option value="auditor">auditor</option>
                         <option value="admin">admin</option>
                       </select>
                     </div>
@@ -674,6 +675,7 @@ export default function AdminPage() {
                             <select value={editRoleValue} onChange={(e) => setEditRoleValue(e.target.value)} className="px-2 py-1 bg-pc-bg border border-pc-border rounded text-xs font-mono text-pc-text focus:outline-none focus:border-pc-accent transition">
                               <option value="developer">developer</option>
                               <option value="manager">manager</option>
+                              <option value="auditor">auditor</option>
                               <option value="admin">admin</option>
                             </select>
                             <button onClick={() => handleUpdateRole(u.username)} className="p-1.5 bg-pc-accent/20 text-pc-accent rounded hover:bg-pc-accent/30 transition" title="Save"><Check size={12} /></button>

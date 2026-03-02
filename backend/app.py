@@ -42,6 +42,11 @@ from core.activity import (
     get_developers_activity,
     get_developer_query_history,
     get_usage_analytics,
+    record_access_attempt,
+    record_policy_violation,
+    get_access_attempts,
+    get_policy_violations,
+    get_security_report,
 )
 
 # 🔹 Security Policies (in-memory store, persists until restart)
@@ -253,6 +258,7 @@ def login(req: LoginRequest):
             status="FAILED",
             details={"reason": "Invalid username or password"},
         )
+        record_access_attempt(req.username, "login", success=False, details="Invalid credentials")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
@@ -260,6 +266,7 @@ def login(req: LoginRequest):
 
     # ✅ Success Login Logging
     token = create_token(user["username"], user["role"])
+    record_access_attempt(user["username"], "login", success=True)
 
     log_action(
         user_email=user["username"],
@@ -415,6 +422,7 @@ def get_me(current_user: dict = Depends(get_current_user)):
 @app.post("/logout")
 def logout(current_user: dict = Depends(get_current_user)):
     record_logout(current_user["username"])
+    record_access_attempt(current_user["username"], "logout", success=True)
     log_action(
         user_email=current_user["username"],
         role=current_user["role"],
@@ -458,7 +466,21 @@ def admin_user_activity(username: str, current_user: dict = Depends(get_current_
 def _require_manager_or_admin(current_user: dict):
     """Helper: raise 403 if not manager or admin."""
     if current_user["role"] not in ("manager", "admin"):
+        record_policy_violation(
+            current_user["username"], "unauthorized_access",
+            endpoint="/manager/*", details="Attempted manager-level access"
+        )
         raise HTTPException(status_code=403, detail="Manager or admin access required")
+
+
+def _require_auditor_or_admin(current_user: dict):
+    """Helper: raise 403 if not auditor or admin."""
+    if current_user["role"] not in ("auditor", "admin"):
+        record_policy_violation(
+            current_user["username"], "unauthorized_access",
+            endpoint="/auditor/*", details="Attempted auditor-level access"
+        )
+        raise HTTPException(status_code=403, detail="Auditor or admin access required")
 
 
 @app.get("/manager/team/members")
@@ -570,7 +592,59 @@ def manager_project_docs(current_user: dict = Depends(get_current_user)):
 
 
 # =========================================================
-# 👥 ADMIN: User Management
+# � AUDITOR: Security Dashboard Endpoints
+# =========================================================
+
+@app.get("/auditor/audit-logs")
+def auditor_audit_logs(current_user: dict = Depends(get_current_user)):
+    """View audit logs (read-only for auditor)."""
+    _require_auditor_or_admin(current_user)
+    try:
+        logs = read_audit_logs()
+        return {"logs": logs, "total": len(logs)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/auditor/access-attempts")
+def auditor_access_attempts(
+    limit: int = 100,
+    current_user: dict = Depends(get_current_user),
+):
+    """Monitor all access attempts (logins, failed/success)."""
+    _require_auditor_or_admin(current_user)
+    attempts = get_access_attempts(limit=limit)
+    total = len(attempts)
+    failed = sum(1 for a in attempts if not a["success"])
+    return {
+        "attempts": attempts,
+        "total": total,
+        "failed": failed,
+        "success": total - failed,
+    }
+
+
+@app.get("/auditor/policy-violations")
+def auditor_policy_violations(
+    limit: int = 100,
+    current_user: dict = Depends(get_current_user),
+):
+    """Review policy violations (unauthorized access, etc.)."""
+    _require_auditor_or_admin(current_user)
+    violations = get_policy_violations(limit=limit)
+    return {"violations": violations, "total": len(violations)}
+
+
+@app.get("/auditor/security-report")
+def auditor_security_report(current_user: dict = Depends(get_current_user)):
+    """Generate a comprehensive security report."""
+    _require_auditor_or_admin(current_user)
+    report = get_security_report()
+    return report
+
+
+# =========================================================
+# �👥 ADMIN: User Management
 # =========================================================
 
 class AddUserRequest(BaseModel):

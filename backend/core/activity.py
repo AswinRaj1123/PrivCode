@@ -208,3 +208,121 @@ def get_usage_analytics() -> dict:
             "hourly_distribution": dict(sorted(hourly_distribution.items())),
             "top_users": top_users[:10],
         }
+
+
+# ── Security Auditor Tracking ──
+# In-memory stores for access attempts and policy violations
+
+_access_attempts: List[dict] = []
+_policy_violations: List[dict] = []
+MAX_ACCESS_LOG = 500
+MAX_VIOLATIONS = 500
+
+
+def record_access_attempt(username: str, action: str, success: bool,
+                          ip: str = "unknown", details: str = ""):
+    """Record a login/access attempt for auditing."""
+    with _lock:
+        entry = {
+            "username": username,
+            "action": action,
+            "success": success,
+            "ip": ip,
+            "details": details,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        _access_attempts.append(entry)
+        if len(_access_attempts) > MAX_ACCESS_LOG:
+            _access_attempts[:] = _access_attempts[-MAX_ACCESS_LOG:]
+
+
+def record_policy_violation(username: str, violation_type: str,
+                            endpoint: str = "", details: str = ""):
+    """Record a policy violation (unauthorized access, etc.)."""
+    with _lock:
+        entry = {
+            "username": username,
+            "violation_type": violation_type,
+            "endpoint": endpoint,
+            "details": details,
+            "severity": "high" if "admin" in endpoint else "medium",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        _policy_violations.append(entry)
+        if len(_policy_violations) > MAX_VIOLATIONS:
+            _policy_violations[:] = _policy_violations[-MAX_VIOLATIONS:]
+
+
+def get_access_attempts(limit: int = 100) -> List[dict]:
+    """Return recent access attempts, newest first."""
+    with _lock:
+        return list(reversed(_access_attempts[-limit:]))
+
+
+def get_policy_violations(limit: int = 100) -> List[dict]:
+    """Return recent policy violations, newest first."""
+    with _lock:
+        return list(reversed(_policy_violations[-limit:]))
+
+
+def get_security_report() -> dict:
+    """Generate an aggregated security report."""
+    with _lock:
+        total_attempts = len(_access_attempts)
+        failed_attempts = sum(1 for a in _access_attempts if not a["success"])
+        successful_attempts = total_attempts - failed_attempts
+        total_violations = len(_policy_violations)
+
+        # Failed logins by user
+        failed_by_user: Dict[str, int] = {}
+        for a in _access_attempts:
+            if not a["success"]:
+                failed_by_user[a["username"]] = failed_by_user.get(a["username"], 0) + 1
+
+        # Violations by type
+        violations_by_type: Dict[str, int] = {}
+        for v in _policy_violations:
+            vt = v["violation_type"]
+            violations_by_type[vt] = violations_by_type.get(vt, 0) + 1
+
+        # Violations by severity
+        violations_by_severity: Dict[str, int] = {}
+        for v in _policy_violations:
+            sev = v["severity"]
+            violations_by_severity[sev] = violations_by_severity.get(sev, 0) + 1
+
+        # Hourly access pattern
+        hourly_access: Dict[str, int] = {}
+        for a in _access_attempts:
+            ts = a.get("timestamp", "")
+            if len(ts) >= 13:
+                hour = ts[11:13]
+                hourly_access[hour] = hourly_access.get(hour, 0) + 1
+
+        # Active sessions count
+        online_count = sum(1 for u in _users.values() if u.get("status") == "online")
+        total_users_tracked = len(_users)
+
+        # Top offenders (most failed attempts)
+        top_offenders = sorted(failed_by_user.items(), key=lambda x: x[1], reverse=True)[:10]
+
+        return {
+            "generated_at": datetime.utcnow().isoformat(),
+            "access_summary": {
+                "total_attempts": total_attempts,
+                "successful": successful_attempts,
+                "failed": failed_attempts,
+                "failure_rate": round(failed_attempts / total_attempts * 100, 1) if total_attempts else 0,
+            },
+            "violations_summary": {
+                "total": total_violations,
+                "by_type": violations_by_type,
+                "by_severity": violations_by_severity,
+            },
+            "session_summary": {
+                "online_users": online_count,
+                "total_tracked_users": total_users_tracked,
+            },
+            "top_offenders": [{"username": u, "failed_attempts": c} for u, c in top_offenders],
+            "hourly_access_pattern": dict(sorted(hourly_access.items())),
+        }

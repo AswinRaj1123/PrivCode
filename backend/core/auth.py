@@ -20,6 +20,7 @@ import jwt
 ROLES = {
     "developer": "view_only",
     "manager": "team_access",
+    "auditor": "security_audit",
     "admin": "full_access",
 }
 
