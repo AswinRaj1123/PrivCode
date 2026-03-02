@@ -145,6 +145,80 @@ export const getDevActivity = async () => {
 };
 
 // =====================================================
+// 👥 ADMIN: User Management
+// =====================================================
+export const getUsers = async () => {
+  return api.get("/admin/users");
+};
+
+export const addUser = async (username, password, role) => {
+  return api.post("/admin/users", { username, password, role });
+};
+
+export const deleteUser = async (username) => {
+  return api.delete(`/admin/users/${username}`);
+};
+
+export const updateUserRole = async (username, role) => {
+  return api.put(`/admin/users/${username}/role`, { role });
+};
+
+export const getRoles = async () => {
+  return api.get("/admin/roles");
+};
+
+// =====================================================
+// 🕷️ ADMIN: Git Crawler
+// =====================================================
+export const triggerCrawler = async (repoPath) => {
+  return api.post("/admin/crawler/trigger", { repo_path: repoPath });
+};
+
+export const getCrawlerStatus = async () => {
+  return api.get("/admin/crawler/status");
+};
+
+// =====================================================
+// 📚 ADMIN: Redis Knowledge Base
+// =====================================================
+export const getRedisStats = async () => {
+  return api.get("/admin/redis/stats");
+};
+
+export const flushRedis = async () => {
+  return api.post("/admin/redis/flush");
+};
+
+export const reindexRedis = async () => {
+  return api.post("/admin/redis/reindex");
+};
+
+// =====================================================
+// 🛡️ ADMIN: Security Policies
+// =====================================================
+export const getSecurityPolicies = async () => {
+  return api.get("/admin/security/policies");
+};
+
+export const updateSecurityPolicies = async (policies) => {
+  return api.put("/admin/security/policies", policies);
+};
+
+// =====================================================
+// 📋 ADMIN: Audit Logs
+// =====================================================
+export const getAuditLogs = async () => {
+  return api.get("/admin/audit-logs");
+};
+
+// =====================================================
+// 📈 ADMIN: System Performance
+// =====================================================
+export const getSystemPerformance = async () => {
+  return api.get("/admin/system/performance");
+};
+
+// =====================================================
 // ❤️ HEALTH CHECK
 // =====================================================
 export const healthCheck = async () => {

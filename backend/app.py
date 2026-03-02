@@ -1,9 +1,13 @@
 """PrivCode FastAPI entrypoint (Next.js compatible)."""
 
 import asyncio
+import os
+import time
+import json
+import psutil
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException, Depends, Header, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,10 +21,13 @@ from core.auth import (
     create_token,
     verify_token,
     check_role,
+    USERS,
+    hash_password,
+    ROLES,
 )
 
 # 🔹 NEW: Action Logger Import
-from utils.logger import log_action
+from utils.logger import log_action, read_audit_logs
 
 # 🔹 Activity Tracker
 from core.activity import (
@@ -32,6 +39,21 @@ from core.activity import (
     get_all_activity,
     get_user_activity,
 )
+
+# 🔹 Security Policies (in-memory store, persists until restart)
+_security_policies = {
+    "max_session_hours": 24,
+    "enforce_mfa": False,
+    "min_password_length": 8,
+    "max_failed_logins": 5,
+    "ip_whitelist_enabled": False,
+    "ip_whitelist": [],
+    "audit_log_retention_days": 90,
+    "allow_public_repos": True,
+}
+
+# 🔹 Server boot time for uptime tracking
+_server_start_time = time.time()
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -421,3 +443,372 @@ def admin_user_activity(username: str, current_user: dict = Depends(get_current_
     if not data:
         raise HTTPException(status_code=404, detail="User not found in activity log")
     return data
+
+
+# =========================================================
+# 👥 ADMIN: User Management
+# =========================================================
+
+class AddUserRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "developer"
+
+
+class UpdateRoleRequest(BaseModel):
+    role: str
+
+
+@app.get("/admin/users")
+def admin_list_users(current_user: dict = Depends(get_current_user)):
+    """List all users (admin only)."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    users = []
+    for uname, data in USERS.items():
+        users.append({
+            "username": uname,
+            "role": data["role"],
+        })
+    return {"users": users}
+
+
+@app.post("/admin/users")
+def admin_add_user(req: AddUserRequest, current_user: dict = Depends(get_current_user)):
+    """Add a new user (admin only)."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    if req.username in USERS:
+        raise HTTPException(status_code=409, detail="User already exists")
+
+    if req.role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {list(ROLES.keys())}")
+
+    if len(req.password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+
+    USERS[req.username] = {
+        "password_hash": hash_password(req.password),
+        "role": req.role,
+    }
+
+    log_action(
+        user_email=current_user["username"],
+        role=current_user["role"],
+        action="add_user",
+        status="SUCCESS",
+        details={"target_user": req.username, "assigned_role": req.role},
+    )
+
+    return {"status": "created", "username": req.username, "role": req.role}
+
+
+@app.delete("/admin/users/{username}")
+def admin_delete_user(username: str, current_user: dict = Depends(get_current_user)):
+    """Remove a user (admin only). Cannot delete yourself."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    if username == current_user["username"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    if username not in USERS:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    del USERS[username]
+
+    log_action(
+        user_email=current_user["username"],
+        role=current_user["role"],
+        action="delete_user",
+        status="SUCCESS",
+        details={"target_user": username},
+    )
+
+    return {"status": "deleted", "username": username}
+
+
+# =========================================================
+# 🔑 ADMIN: Role Management (RBAC)
+# =========================================================
+
+@app.put("/admin/users/{username}/role")
+def admin_update_role(username: str, req: UpdateRoleRequest, current_user: dict = Depends(get_current_user)):
+    """Update a user's role (admin only)."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    if username not in USERS:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if req.role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {list(ROLES.keys())}")
+
+    old_role = USERS[username]["role"]
+    USERS[username]["role"] = req.role
+
+    log_action(
+        user_email=current_user["username"],
+        role=current_user["role"],
+        action="update_role",
+        status="SUCCESS",
+        details={"target_user": username, "old_role": old_role, "new_role": req.role},
+    )
+
+    return {"status": "updated", "username": username, "old_role": old_role, "new_role": req.role}
+
+
+@app.get("/admin/roles")
+def admin_list_roles(current_user: dict = Depends(get_current_user)):
+    """List all available roles."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    return {"roles": [{"name": k, "access": v} for k, v in ROLES.items()]}
+
+
+# =========================================================
+# 🕷️ ADMIN: Git Crawler
+# =========================================================
+
+class CrawlRequest(BaseModel):
+    repo_path: str
+
+
+@app.post("/admin/crawler/trigger")
+def admin_trigger_crawler(req: CrawlRequest, current_user: dict = Depends(get_current_user)):
+    """Manually trigger Git crawler / re-indexing."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        incremental_index(req.repo_path)
+
+        log_action(
+            user_email=current_user["username"],
+            role=current_user["role"],
+            action="trigger_crawler",
+            status="SUCCESS",
+            details={"repo": req.repo_path},
+        )
+
+        return {"status": "success", "message": f"Crawler completed for: {req.repo_path}"}
+    except Exception as exc:
+        log_action(
+            user_email=current_user["username"],
+            role=current_user["role"],
+            action="trigger_crawler",
+            status="ERROR",
+            details={"repo": req.repo_path, "error": str(exc)},
+        )
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/admin/crawler/status")
+def admin_crawler_status(current_user: dict = Depends(get_current_user)):
+    """Get current Git crawler / repo status."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        from git import Repo as GitRepo
+        repo = GitRepo(str(REPO_PATH))
+        branch = repo.active_branch.name
+        sha = repo.head.commit.hexsha[:8]
+        last_msg = repo.head.commit.message.strip()[:100]
+        last_author = str(repo.head.commit.author)
+        last_date = repo.head.commit.committed_datetime.isoformat()
+
+        return {
+            "repo_path": str(REPO_PATH),
+            "branch": branch,
+            "head_sha": sha,
+            "last_commit_message": last_msg,
+            "last_commit_author": last_author,
+            "last_commit_date": last_date,
+            "status": "connected",
+        }
+    except Exception as exc:
+        return {
+            "repo_path": str(REPO_PATH),
+            "status": "error",
+            "error": str(exc),
+        }
+
+
+# =========================================================
+# 📚 ADMIN: Redis Knowledge Base Management
+# =========================================================
+
+@app.get("/admin/redis/stats")
+def admin_redis_stats(current_user: dict = Depends(get_current_user)):
+    """Get Redis knowledge base statistics."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        from utils.redis_utils import get_redis_client, get_index
+        client = get_redis_client()
+        info = client.info()
+
+        # Count indexed documents
+        try:
+            idx = get_index()
+            idx_info = idx.info()
+            num_docs = idx_info.get("num_docs", 0) if isinstance(idx_info, dict) else 0
+        except Exception:
+            num_docs = "unknown"
+
+        return {
+            "status": "connected",
+            "used_memory_human": info.get("used_memory_human", "N/A"),
+            "used_memory_bytes": info.get("used_memory", 0),
+            "total_keys": client.dbsize(),
+            "indexed_documents": num_docs,
+            "connected_clients": info.get("connected_clients", 0),
+            "uptime_seconds": info.get("uptime_in_seconds", 0),
+            "redis_version": info.get("redis_version", "unknown"),
+        }
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+@app.post("/admin/redis/flush")
+def admin_redis_flush(current_user: dict = Depends(get_current_user)):
+    """Flush the Redis knowledge base (danger!)."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        from utils.redis_utils import get_redis_client
+        client = get_redis_client()
+        client.flushdb()
+
+        log_action(
+            user_email=current_user["username"],
+            role=current_user["role"],
+            action="redis_flush",
+            status="SUCCESS",
+        )
+
+        return {"status": "flushed", "message": "Knowledge base cleared. Re-index to rebuild."}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/admin/redis/reindex")
+def admin_redis_reindex(current_user: dict = Depends(get_current_user)):
+    """Force full re-index into Redis."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        from services.indexer import build_full_index
+        build_full_index(REPO_PATH)
+
+        log_action(
+            user_email=current_user["username"],
+            role=current_user["role"],
+            action="redis_reindex",
+            status="SUCCESS",
+        )
+
+        return {"status": "reindexed", "message": "Full re-index completed."}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# =========================================================
+# 🛡️ ADMIN: Security Policies
+# =========================================================
+
+@app.get("/admin/security/policies")
+def admin_get_policies(current_user: dict = Depends(get_current_user)):
+    """Get current security policies."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    return {"policies": _security_policies}
+
+
+@app.put("/admin/security/policies")
+def admin_update_policies(policies: dict, current_user: dict = Depends(get_current_user)):
+    """Update security policies."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    allowed_keys = set(_security_policies.keys())
+    for key, value in policies.items():
+        if key in allowed_keys:
+            _security_policies[key] = value
+
+    log_action(
+        user_email=current_user["username"],
+        role=current_user["role"],
+        action="update_security_policies",
+        status="SUCCESS",
+        details={"updated_keys": list(policies.keys())},
+    )
+
+    return {"status": "updated", "policies": _security_policies}
+
+
+# =========================================================
+# 📋 ADMIN: Audit Logs
+# =========================================================
+
+@app.get("/admin/audit-logs")
+def admin_audit_logs(current_user: dict = Depends(get_current_user)):
+    """Read and return decrypted audit logs."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        logs = read_audit_logs()
+        return {"logs": logs, "total": len(logs)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# =========================================================
+# 📈 ADMIN: System Performance Monitoring
+# =========================================================
+
+@app.get("/admin/system/performance")
+def admin_system_performance(current_user: dict = Depends(get_current_user)):
+    """Get real-time system performance metrics."""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        cpu_percent = psutil.cpu_percent(interval=0.5)
+        mem = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+        uptime = time.time() - _server_start_time
+
+        # Activity stats
+        all_activity = get_all_activity()
+        online_count = sum(1 for u in all_activity if u.get("status") == "online")
+        total_queries = sum(u.get("total_queries", 0) for u in all_activity)
+
+        return {
+            "cpu_percent": cpu_percent,
+            "memory": {
+                "total_gb": round(mem.total / (1024**3), 2),
+                "used_gb": round(mem.used / (1024**3), 2),
+                "percent": mem.percent,
+            },
+            "disk": {
+                "total_gb": round(disk.total / (1024**3), 2),
+                "used_gb": round(disk.used / (1024**3), 2),
+                "percent": round(disk.used / disk.total * 100, 1),
+            },
+            "server_uptime_seconds": round(uptime),
+            "online_users": online_count,
+            "total_users": len(all_activity),
+            "total_queries": total_queries,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

@@ -67,6 +67,30 @@ def view_logs():
             print("Decryption failed - wrong key or corrupted entry")
             return
 
+
+def read_audit_logs(limit: int = 200):
+    """Decrypt and return audit log entries as a list of dicts."""
+    if not os.path.exists(AUDIT_LOG_FILE):
+        return []
+
+    with open(AUDIT_LOG_FILE, "rb") as f:
+        encrypted_content = f.read().split(b"\n")
+
+    entries = []
+    for line in encrypted_content:
+        if not line.strip():
+            continue
+        try:
+            decrypted = fernet.decrypt(line).decode()
+            entry = json.loads(decrypted.strip())
+            entries.append(entry)
+        except (InvalidToken, json.JSONDecodeError):
+            continue  # skip corrupted entries
+
+    # Return most recent first, limited
+    entries.reverse()
+    return entries[:limit]
+
 if __name__ == "__main__":
     # Test logging
     log_action(
