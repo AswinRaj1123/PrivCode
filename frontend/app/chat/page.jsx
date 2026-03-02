@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { queryCode, indexRepo, getDevActivity, logoutSession } from "@/lib/api";
+import { queryCode, indexRepo, logoutSession } from "@/lib/api";
 import { auth } from "@/lib/auth";
 import {
   Send,
@@ -28,9 +28,6 @@ import {
   Sparkles,
   Users,
   Activity,
-  Clock,
-  Search,
-  RefreshCw,
 } from "lucide-react";
 
 // ── Code Block with copy button ──
@@ -250,31 +247,6 @@ export default function ChatPage() {
   }, [messages]);
 
   const isAdmin = user?.role === "admin";
-  const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [devActivity, setDevActivity] = useState([]);
-  const [activityLoading, setActivityLoading] = useState(false);
-
-  // Fetch developer activity (admin only)
-  const fetchActivity = useCallback(async () => {
-    if (!isAdmin) return;
-    setActivityLoading(true);
-    try {
-      const res = await getDevActivity();
-      setDevActivity(res.data?.developers || []);
-    } catch {
-      setDevActivity([]);
-    } finally {
-      setActivityLoading(false);
-    }
-  }, [isAdmin]);
-
-  // Auto-refresh activity when admin panel is open
-  useEffect(() => {
-    if (!showAdminPanel || !isAdmin) return;
-    fetchActivity();
-    const interval = setInterval(fetchActivity, 15000);
-    return () => clearInterval(interval);
-  }, [showAdminPanel, isAdmin, fetchActivity]);
 
   // ── Actions ──
   const handleLogout = async () => {
@@ -504,12 +476,8 @@ export default function ChatPage() {
           </button>
           {isAdmin && (
             <button
-              onClick={() => { setShowAdminPanel(!showAdminPanel); setShowIndexPanel(false); }}
-              className={`w-full px-3 py-2 border rounded text-xs transition flex items-center gap-2 ${
-                showAdminPanel
-                  ? "bg-pc-accent/10 border-pc-accent/30 text-pc-accent"
-                  : "bg-pc-elevated border-pc-border text-pc-secondary hover:text-pc-text hover:bg-pc-hover"
-              }`}
+              onClick={() => router.push("/activity")}
+              className="w-full px-3 py-2 bg-pc-elevated border border-pc-border rounded text-xs text-pc-secondary hover:text-pc-text hover:bg-pc-hover transition flex items-center gap-2"
             >
               <Users size={13} />
               Developer Activity
@@ -592,123 +560,7 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* ── Admin: Developer Activity Dashboard ── */}
-        {isAdmin && showAdminPanel && (
-          <div className="border-b border-pc-border bg-pc-surface">
-            <div className="max-w-4xl mx-auto px-4 py-4">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Users size={16} className="text-pc-accent" />
-                  <h3 className="text-sm font-semibold text-pc-text">Developer Activity</h3>
-                  <span className="text-[10px] text-pc-muted bg-pc-elevated px-1.5 py-0.5 rounded">
-                    {devActivity.length} developer{devActivity.length !== 1 ? "s" : ""}
-                  </span>
-                </div>
-                <button
-                  onClick={fetchActivity}
-                  disabled={activityLoading}
-                  className="flex items-center gap-1 text-[10px] text-pc-muted hover:text-pc-accent transition"
-                >
-                  <RefreshCw size={11} className={activityLoading ? "animate-spin" : ""} />
-                  Refresh
-                </button>
-              </div>
 
-              {devActivity.length === 0 ? (
-                <div className="text-center py-6">
-                  <Users size={24} className="text-pc-muted mx-auto mb-2 opacity-40" />
-                  <p className="text-xs text-pc-muted">No developer activity yet</p>
-                  <p className="text-[10px] text-pc-muted mt-1">Activity will appear once developers log in</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {devActivity.map((dev) => (
-                    <div key={dev.username} className="bg-pc-bg border border-pc-border rounded-lg p-3">
-                      {/* Developer Header */}
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded bg-pc-elevated border border-pc-border flex items-center justify-center text-pc-accent text-xs font-mono font-semibold">
-                            {dev.username.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium text-pc-text">{dev.username}</p>
-                            <p className="text-[10px] text-pc-muted">{dev.role}</p>
-                          </div>
-                          <span className={`ml-2 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                            dev.status === "online"
-                              ? "bg-pc-success/10 text-pc-success border border-pc-success/20"
-                              : "bg-pc-muted/10 text-pc-muted border border-pc-border"
-                          }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${dev.status === "online" ? "bg-pc-success" : "bg-pc-muted"}`} />
-                            {dev.status}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Stats Grid */}
-                      <div className="grid grid-cols-4 gap-2 mb-3">
-                        <div className="bg-pc-surface rounded p-2 border border-pc-border/50">
-                          <p className="text-[10px] text-pc-muted uppercase tracking-wider mb-0.5">Queries</p>
-                          <p className="text-sm font-mono font-semibold text-pc-text">{dev.total_queries}</p>
-                        </div>
-                        <div className="bg-pc-surface rounded p-2 border border-pc-border/50">
-                          <p className="text-[10px] text-pc-muted uppercase tracking-wider mb-0.5">Indexed</p>
-                          <p className="text-sm font-mono font-semibold text-pc-text">{dev.total_indexing}</p>
-                        </div>
-                        <div className="bg-pc-surface rounded p-2 border border-pc-border/50">
-                          <p className="text-[10px] text-pc-muted uppercase tracking-wider mb-0.5">Current Repo</p>
-                          <p className="text-xs font-mono text-pc-accent truncate" title={dev.current_repo}>
-                            {dev.current_repo ? dev.current_repo.replace(/\.git$/, "").split("/").filter(Boolean).pop() : "—"}
-                          </p>
-                        </div>
-                        <div className="bg-pc-surface rounded p-2 border border-pc-border/50">
-                          <p className="text-[10px] text-pc-muted uppercase tracking-wider mb-0.5">Last Active</p>
-                          <p className="text-xs font-mono text-pc-secondary">
-                            {dev.last_active ? new Date(dev.last_active + "Z").toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Session Times */}
-                      <div className="flex items-center gap-4 text-[10px] text-pc-muted mb-3">
-                        <span className="flex items-center gap-1">
-                          <Clock size={10} />
-                          Login: {dev.last_login ? new Date(dev.last_login + "Z").toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <LogOut size={10} />
-                          Logout: {dev.last_logout ? new Date(dev.last_logout + "Z").toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                        </span>
-                      </div>
-
-                      {/* Recent Queries */}
-                      {dev.recent_queries && dev.recent_queries.length > 0 && (
-                        <div>
-                          <p className="text-[10px] text-pc-muted uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                            <Search size={10} />
-                            Recent Queries
-                          </p>
-                          <div className="space-y-1 max-h-32 overflow-y-auto">
-                            {dev.recent_queries.slice().reverse().slice(0, 5).map((q, i) => (
-                              <div key={i} className="flex items-center gap-2 text-[11px] bg-pc-surface rounded px-2 py-1 border border-pc-border/30">
-                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${q.status === "SUCCESS" ? "bg-pc-success" : "bg-pc-danger"}`} />
-                                <span className="text-pc-text truncate flex-1" title={q.query}>{q.query}</span>
-                                <span className="text-pc-muted flex-shrink-0 uppercase text-[9px]">{q.mode}</span>
-                                <span className="text-pc-muted flex-shrink-0">
-                                  {new Date(q.timestamp + "Z").toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* ── Chat Area ── */}
         <div className="flex-1 overflow-y-auto">
