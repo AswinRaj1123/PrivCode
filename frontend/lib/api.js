@@ -113,6 +113,8 @@ export const queryCode = async (question, repoPath, mode = "auto") => {
     question,
     repo_path: repoPath,
     mode,
+  }, {
+    timeout: 300000, // 5 min timeout for LLM inference on CPU
   });
 };
 

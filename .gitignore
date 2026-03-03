@@ -6,6 +6,7 @@ data/
 *.faiss
 *.pkl
 models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf
+models/Phi-3-mini-4k-instruct-q4.gguf
 query_log.txt
 query_log.enc
 privcode.log

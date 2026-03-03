@@ -36,14 +36,19 @@ def get_llm():
             )
         
         logger.info("🧠 Loading local LLM from: %s", MODEL_PATH)
+
+        # Detect available CPU threads (use all physical cores)
+        cpu_threads = os.cpu_count() or 6
+
         llm = Llama(
             model_path=str(MODEL_PATH),
             n_ctx=2048,          # reduced for speed
-            n_threads=6,
+            n_threads=cpu_threads,
+            n_batch=512,         # larger batch = faster prompt processing
             n_gpu_layers=0,      # CPU mode
             verbose=False,
         )
-        logger.info("✅ LLM loaded successfully")
+        logger.info("✅ LLM loaded successfully (threads=%d)", cpu_threads)
     return llm
 
 # -----------------------------------------------------------------------------
@@ -53,45 +58,31 @@ def get_llm():
 def build_augmented_prompt(query: str, contexts: List[Dict]) -> str:
     allowed_files = sorted({ctx["file_path"] for ctx in contexts})
 
-    prompt = f"""
-You are an expert software engineer analyzing a private startup codebase.
+    # Truncate each code chunk to limit total prompt size (faster inference)
+    MAX_CHUNK_CHARS = 800
 
-STRICT RULES (VERY IMPORTANT):
-- Use ONLY the provided code context.
-- Do NOT guess or hallucinate.
-- If the answer is not in the context, say "Not found in the provided code."
-- Wrap any code snippets inside the explanation or suggestions in triple-backtick fences with the language name.
-- Do NOT use any other markdown formatting.
-- Output ONLY ONE JSON object.
-- Output must start with '{{' and end with '}}'.
+    prompt = f"""You are an expert software engineer analyzing a codebase.
+Rules: Use ONLY the code below. No guessing. Output ONE JSON object.
 
-The ONLY files you are allowed to reference are:
-{allowed_files}
+Files: {allowed_files}
 
-Retrieved Code Context:
+Code Context:
 """
 
     for i, ctx in enumerate(contexts, 1):
+        code = ctx["content"][:MAX_CHUNK_CHARS]
         prompt += f"""
 --- Chunk {i} ---
 File: {ctx["file_path"]}
-Similarity Score: {ctx["score"]}
-
-Code:
-{ctx["content"]}
-
-AST Metadata:
-{json.dumps(ctx["metadata"], indent=2)}
+{code}
 """
 
     prompt += f"""
-User Question:
-{query}
+Question: {query}
 
-Respond ONLY in this exact JSON format:
-
+Respond in this JSON format:
 {{
-  "summary": "One-line concise answer",
+  "summary": "One-line answer",
   "explanation": "Detailed explanation grounded in the code",
   "bugs_found": [],
   "suggestions": [],
@@ -154,12 +145,16 @@ def rag_query(query: str, top_k: int = 3) -> Dict:
     
     response = model(
         prompt,
-        max_tokens=256,   # FAST mode
+        max_tokens=192,   # shorter = faster
         temperature=0.1,  # reduces hallucination
         top_p=0.9,
+        stop=["}", "\n\n\n"],  # stop early once JSON closes
     )
 
     raw_text = response["choices"][0]["text"].strip()
+    # Re-append closing brace if stop token consumed it
+    if not raw_text.rstrip().endswith("}"):
+        raw_text = raw_text.rstrip() + "}"
 
     try:
         parsed = extract_first_valid_json(raw_text)
@@ -215,9 +210,10 @@ def general_query(query: str) -> Dict:
 
     response = model(
         prompt,
-        max_tokens=512,
+        max_tokens=256,
         temperature=0.3,
         top_p=0.9,
+        stop=["\n\n\n"],  # stop early to avoid rambling
     )
 
     raw_text = response["choices"][0]["text"].strip()
@@ -254,12 +250,16 @@ def auto_query(query: str, top_k: int = 3) -> Dict:
 
         response = model(
             prompt,
-            max_tokens=256,
+            max_tokens=192,
             temperature=0.1,
             top_p=0.9,
+            stop=["}", "\n\n\n"],  # stop early once JSON closes
         )
 
         raw_text = response["choices"][0]["text"].strip()
+        # Re-append closing brace if stop token consumed it
+        if not raw_text.rstrip().endswith("}"):
+            raw_text = raw_text.rstrip() + "}"
 
         try:
             parsed = extract_first_valid_json(raw_text)
