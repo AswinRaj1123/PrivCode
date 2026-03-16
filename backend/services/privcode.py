@@ -97,24 +97,32 @@ Respond in this JSON format:
 
 def extract_first_valid_json(text: str) -> Dict:
     """
-    Extract the FIRST valid JSON object from messy LLM output.
-    Handles:
-    - multiple JSON blocks
-    - markdown fences
-    - extra text
-    - partial generations
+    Extract the first valid JSON object from messy LLM output.
+    More robust than regex-only extraction: supports nested braces,
+    leading/trailing prose, and fenced code blocks.
     """
-    # Remove markdown fences
-    text = re.sub(r"```(?:json)?", "", text)
+    # Remove markdown fences while keeping content
+    cleaned = text.replace("```json", "").replace("```", "").strip()
 
-    # Find all possible JSON blocks
-    candidates = re.findall(r"\{[\s\S]*?\}", text)
+    decoder = json.JSONDecoder()
 
-    for block in candidates:
+    # Try decoding from every opening brace position.
+    start_positions = [i for i, ch in enumerate(cleaned) if ch == "{"]
+    for start in start_positions:
         try:
-            return json.loads(block)
+            obj, _ = decoder.raw_decode(cleaned[start:])
+            if isinstance(obj, dict):
+                return obj
         except json.JSONDecodeError:
             continue
+
+    # Fallback: try strict parse if text itself is JSON.
+    try:
+        obj = json.loads(cleaned)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
 
     raise ValueError("No valid JSON object found")
 
@@ -145,16 +153,14 @@ def rag_query(query: str, top_k: int = 3) -> Dict:
     
     response = model(
         prompt,
-        max_tokens=192,   # shorter = faster
+        max_tokens=320,
         temperature=0.1,  # reduces hallucination
         top_p=0.9,
-        stop=["}", "\n\n\n"],  # stop early once JSON closes
+        # Avoid stopping on '}' because it can truncate nested JSON.
+        stop=["\n\n\n", "```"],
     )
 
     raw_text = response["choices"][0]["text"].strip()
-    # Re-append closing brace if stop token consumed it
-    if not raw_text.rstrip().endswith("}"):
-        raw_text = raw_text.rstrip() + "}"
 
     try:
         parsed = extract_first_valid_json(raw_text)
@@ -169,9 +175,14 @@ def rag_query(query: str, top_k: int = 3) -> Dict:
 
     except Exception as exc:
         logger.error("Failed to parse LLM output: %s", exc)
+        # Return a safe structured fallback so API clients don't break.
         return {
-            "error": "Failed to parse LLM output",
-            "raw_output": raw_text,
+            "summary": "Unable to format model output as JSON",
+            "explanation": raw_text or "Model returned an empty response.",
+            "bugs_found": [],
+            "suggestions": [],
+            "sources": list(sorted({ctx["file_path"] for ctx in contexts})),
+            "parse_error": "No valid JSON object found",
         }
 
 
@@ -250,16 +261,13 @@ def auto_query(query: str, top_k: int = 3) -> Dict:
 
         response = model(
             prompt,
-            max_tokens=192,
+            max_tokens=320,
             temperature=0.1,
             top_p=0.9,
-            stop=["}", "\n\n\n"],  # stop early once JSON closes
+            stop=["\n\n\n", "```"],
         )
 
         raw_text = response["choices"][0]["text"].strip()
-        # Re-append closing brace if stop token consumed it
-        if not raw_text.rstrip().endswith("}"):
-            raw_text = raw_text.rstrip() + "}"
 
         try:
             parsed = extract_first_valid_json(raw_text)
@@ -269,7 +277,15 @@ def auto_query(query: str, top_k: int = 3) -> Dict:
             return parsed
         except Exception as exc:
             logger.error("Failed to parse RAG output: %s", exc)
-            return {"error": "Failed to parse LLM output", "raw_output": raw_text}
+            return {
+                "summary": "Unable to format model output as JSON",
+                "explanation": raw_text or "Model returned an empty response.",
+                "bugs_found": [],
+                "suggestions": [],
+                "sources": list(sorted({ctx["file_path"] for ctx in contexts})),
+                "mode": "repo",
+                "parse_error": "No valid JSON object found",
+            }
     else:
         # General path — no relevant code
         logger.info("Auto mode: no relevant code, falling back to general")

@@ -1,10 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::process::Command;
-use tauri::{AppHandle, Manager};
-use tray_icon::{
+use tauri::{
     menu::{Menu, MenuItem},
-    TrayIconBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager,
 };
 
 fn main() {
@@ -12,17 +12,30 @@ fn main() {
         .setup(|app| {
             // Step 1: Check and install Ollama if missing
             install_ollama_if_missing();
-            
-            // Step 2: Start FastAPI backend
-            start_backend();
-            
-            // Step 3: Setup tray UI
-            create_tray(app.handle().clone());
+
+            // Step 2: Start FastAPI backend only when agent runs standalone.
+            // If launched by python main.py, backend is already managed there.
+            let managed_backend = std::env::var("PRIVCODE_MANAGED_BACKEND")
+                .map(|v| v == "1")
+                .unwrap_or(false);
+            if managed_backend {
+                eprintln!("[PrivCode] Backend managed by main.py — skipping internal backend start");
+            } else {
+                start_backend();
+            }
+
+            // Step 3: Setup system tray icon
+            create_tray(app)?;
+
+            // Step 4: Watch the backend — exit tray when backend stops
+            start_backend_watcher();
+
             Ok(())
         })
         .on_window_event(|window, event| {
+            // Hide to tray instead of closing
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                window.hide().unwrap();
+                let _ = window.hide();
                 api.prevent_close();
             }
         })
@@ -119,45 +132,99 @@ fn install_ollama_if_missing() {
     }
 }
 
-fn create_tray(app: AppHandle) {
-    let show_item = MenuItem::new("Show PrivCode", true, None);
-    let quit_item = MenuItem::new("Quit", true, None);
+/// Spawn a background thread that polls localhost:8000 every 3 seconds.
+/// When the backend stops responding (python main.py was stopped),
+/// the agent exits cleanly so the tray icon disappears automatically.
+fn start_backend_watcher() {
+    std::thread::spawn(|| {
+        let backend_port = std::env::var("PRIVCODE_BACKEND_PORT")
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(8000);
 
-    let tray_menu = Menu::new();
-    tray_menu.append(&show_item).unwrap();
-    tray_menu.append(&quit_item).unwrap();
+        // Give the backend a few seconds to fully start before we begin watching.
+        std::thread::sleep(std::time::Duration::from_secs(8));
 
-    let icon = load_icon();
+        let mut seen_backend_once = false;
+        let mut consecutive_failures: u32 = 0;
 
-    let show_id = show_item.id().clone();
-    let quit_id = quit_item.id().clone();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(3));
 
-    let tray = TrayIconBuilder::new()
-        .with_menu(Box::new(tray_menu))
-        .with_tooltip("PrivCode AI Agent")
-        .with_icon(icon)
-        .build()
-        .unwrap();
+            let address = format!("127.0.0.1:{}", backend_port);
+            let alive = std::net::TcpStream::connect_timeout(
+                &address.parse().unwrap(),
+                std::time::Duration::from_secs(2),
+            )
+            .is_ok();
 
-    // Handle tray menu events via global MenuEvent receiver
-    let app_handle = app.clone();
-    std::thread::spawn(move || {
-        let rx = tray_icon::menu::MenuEvent::receiver();
-        while let Ok(event) = rx.recv() {
-            if event.id == show_id {
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    window.show().unwrap();
-                    window.set_focus().unwrap();
+            if alive {
+                seen_backend_once = true;
+                consecutive_failures = 0;
+            } else {
+                // During startup we may not have a listening server yet.
+                // Don't count failures until we have seen backend alive once.
+                if !seen_backend_once {
+                    continue;
                 }
-            } else if event.id == quit_id {
-                std::process::exit(0);
+
+                consecutive_failures += 1;
+                eprintln!(
+                    "[PrivCode] Backend not reachable (attempt {}/3)",
+                    consecutive_failures
+                );
+                // Require 3 consecutive failures before exiting
+                // to avoid a false-positive during a brief restart.
+                if consecutive_failures >= 3 {
+                    eprintln!("[PrivCode] Backend stopped — exiting tray agent");
+                    std::process::exit(0);
+                }
             }
         }
     });
-
-    std::mem::forget(tray); // keep tray alive
 }
 
-fn load_icon() -> tray_icon::Icon {
-    tray_icon::Icon::from_path("icons/icon.ico", None).unwrap()
+fn create_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Show PrivCode", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit PrivCode", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    TrayIconBuilder::new()
+        .icon(app.default_window_icon().unwrap().clone())
+        .menu(&menu)
+        .tooltip("PrivCode AI Agent")
+        // Left-click toggles the window; right-click shows the menu
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }
+            "quit" => std::process::exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            // Single left-click: toggle window visibility
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let app = tray.app_handle();
+                if let Some(w) = app.get_webview_window("main") {
+                    if w.is_visible().unwrap_or(false) {
+                        let _ = w.hide();
+                    } else {
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                }
+            }
+        })
+        .build(app)?;
+
+    Ok(())
 }

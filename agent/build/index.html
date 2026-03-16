@@ -4,376 +4,557 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PrivCode AI Agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        /* ── PrivCode Design Tokens ── */
+        :root {
+            --bg-primary:   #0d1117;
+            --bg-surface:   #161b22;
+            --bg-raised:    #1c2128;
+            --bg-elevated:  #21262d;
+            --bg-hover:     #292e36;
+            --border:       #30363d;
+            --border-muted: #21262d;
+            --text:         #e6edf3;
+            --text-sec:     #8b949e;
+            --text-muted:   #6e7681;
+            --accent:       #58a6ff;
+            --success:      #3fb950;
+            --warning:      #d29922;
+            --danger:       #f85149;
+            --accent-muted: rgba(88, 166, 255, 0.12);
+            --success-muted:rgba(63, 185, 80, 0.12);
+            --danger-muted: rgba(248, 81, 73, 0.12);
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-primary);
             height: 100vh;
+            display: flex;
+            flex-direction: column;
+            color: var(--text);
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        /* ── Layout ── */
+        .app {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ── Header ── */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 20px;
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            border: 2px solid var(--accent);
+            border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #e2e8f0;
+            flex-shrink: 0;
         }
-        
-        .installer-window {
-            width: 100%;
-            max-width: 600px;
-            height: 100vh;
-            max-height: 700px;
-            background: #1e293b;
-            border-radius: 12px;
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 30px;
-            text-align: center;
-            border-bottom: 2px solid rgba(255, 255, 255, 0.1);
-        }
-        
-        .header h1 {
-            font-size: 28px;
-            font-weight: 700;
-            margin-bottom: 5px;
+
+        .logo-icon span {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--accent);
             letter-spacing: -0.5px;
         }
-        
-        .header p {
-            font-size: 14px;
-            opacity: 0.9;
-            font-weight: 400;
+
+        .logo-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text);
+            letter-spacing: -0.3px;
         }
-        
+
+        .header-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--warning);
+            flex-shrink: 0;
+        }
+
+        .status-dot.ready { background: var(--success); }
+        .status-dot.pulse { animation: pulse 1.5s ease-in-out infinite; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* ── Content area ── */
         .content {
             flex: 1;
             overflow-y: auto;
-            padding: 30px;
+            padding: 20px;
+            scrollbar-width: thin;
+            scrollbar-color: var(--bg-elevated) transparent;
         }
-        
+
+        .content::-webkit-scrollbar { width: 4px; }
+        .content::-webkit-scrollbar-track { background: transparent; }
+        .content::-webkit-scrollbar-thumb { background: var(--bg-elevated); border-radius: 2px; }
+
+        /* ── Section label ── */
+        .section-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 12px;
+        }
+
+        /* ── Status list ── */
         .status-list {
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 8px;
         }
-        
+
         .status-item {
             display: flex;
-            align-items: flex-start;
+            align-items: center;
             gap: 12px;
-            padding: 14px;
-            background: rgba(30, 41, 59, 0.5);
-            border-radius: 8px;
-            border-left: 3px solid #667eea;
-            transition: all 0.3s ease;
+            padding: 12px 14px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-muted);
+            border-left: 3px solid var(--accent);
+            border-radius: 6px;
+            transition: border-left-color 0.25s, background 0.25s;
         }
-        
+
         .status-item.completed {
-            border-left-color: #10b981;
-            background: rgba(16, 185, 129, 0.1);
+            border-left-color: var(--success);
+            background: var(--success-muted);
+            border-color: rgba(63, 185, 80, 0.2);
+            border-left-color: var(--success);
         }
-        
+
         .status-item.error {
-            border-left-color: #ef4444;
-            background: rgba(239, 68, 68, 0.1);
+            border-left-color: var(--danger);
+            background: var(--danger-muted);
+            border-color: rgba(248, 81, 73, 0.2);
+            border-left-color: var(--danger);
         }
-        
-        .status-icon {
-            min-width: 24px;
-            width: 24px;
-            height: 24px;
+
+        /* ── Step icon ── */
+        .step-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 14px;
-            margin-top: 2px;
+            flex-shrink: 0;
+            font-size: 13px;
         }
-        
+
+        .status-item.completed .step-icon {
+            background: rgba(63, 185, 80, 0.15);
+            border-color: rgba(63, 185, 80, 0.3);
+        }
+
+        .status-item.error .step-icon {
+            background: rgba(248, 81, 73, 0.15);
+            border-color: rgba(248, 81, 73, 0.3);
+        }
+
+        /* ── Spinner ── */
         .spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(102, 126, 234, 0.3);
-            border-top-color: #667eea;
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
             border-radius: 50%;
-            animation: spin 0.8s linear infinite;
+            animation: spin 0.7s linear infinite;
         }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Step text ── */
+        .step-body { flex: 1; min-width: 0; }
+
+        .step-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text);
+            margin-bottom: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
-        
-        .checkmark {
-            color: #10b981;
-            font-weight: bold;
-        }
-        
-        .error-mark {
-            color: #ef4444;
-            font-weight: bold;
-        }
-        
-        .status-content {
-            flex: 1;
-        }
-        
-        .status-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: #e2e8f0;
-            margin-bottom: 4px;
-        }
-        
-        .status-message {
-            font-size: 12px;
-            color: #94a3b8;
+
+        .step-sub {
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
             line-height: 1.4;
         }
-        
-        .status-message.success {
-            color: #10b981;
+
+        .step-sub.ok  { color: var(--success); }
+        .step-sub.err { color: var(--danger); }
+
+        /* ── Badge ── */
+        .badge {
+            font-size: 10px;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+            padding: 2px 7px;
+            border-radius: 4px;
+            flex-shrink: 0;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
-        
-        .status-message.error {
-            color: #ef4444;
+
+        .badge-pending  { background: var(--accent-muted);  color: var(--accent);  border: 1px solid rgba(88,166,255,0.2); }
+        .badge-done     { background: var(--success-muted); color: var(--success); border: 1px solid rgba(63,185,80,0.2); }
+        .badge-error    { background: var(--danger-muted);  color: var(--danger);  border: 1px solid rgba(248,81,73,0.2); }
+
+        /* ── Progress bar ── */
+        .progress-section {
+            margin-top: 20px;
         }
-        
-        .footer {
-            padding: 20px 30px;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(15, 23, 42, 0.5);
+
+        .progress-header {
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
         }
-        
-        .overall-status {
-            font-size: 13px;
-            color: #94a3b8;
+
+        .progress-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-weight: 500;
         }
-        
-        .overall-status.ready {
-            color: #10b981;
+
+        .progress-pct {
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent);
             font-weight: 600;
         }
-        
-        .progress-bar {
+
+        .progress-track {
             width: 100%;
             height: 3px;
-            background: rgba(102, 126, 234, 0.2);
+            background: var(--bg-elevated);
             border-radius: 2px;
-            margin-top: 10px;
             overflow: hidden;
         }
-        
+
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            background: var(--accent);
             border-radius: 2px;
-            transition: width 0.3s ease;
+            transition: width 0.4s ease;
+            width: 0%;
         }
 
-        .dot-pulse {
-            display: inline-block;
+        /* ── Footer ── */
+        .footer {
+            padding: 12px 20px;
+            border-top: 1px solid var(--border);
+            background: var(--bg-surface);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
         }
 
+        .footer-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .footer-left.ready { color: var(--success); font-weight: 500; }
+
+        .footer-right {
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
+        }
+
+        /* ── Dot pulse for "loading" text ── */
         .dot-pulse::after {
             content: '.';
             animation: dots 1.5s steps(4, end) infinite;
         }
 
         @keyframes dots {
-            0%, 20% { content: '.'; }
-            40% { content: '..'; }
-            60% { content: '...'; }
-            100% { content: ''; }
+            0%, 20%  { content: '.'; }
+            40%      { content: '..'; }
+            60%      { content: '...'; }
+            100%     { content: ''; }
+        }
+
+        /* ── Selection ── */
+        ::selection {
+            background: var(--accent-muted);
+            color: var(--accent);
         }
     </style>
 </head>
 <body>
-    <div class="installer-window">
+    <div class="app">
+
+        <!-- Header -->
         <div class="header">
-            <h1>🔐 PrivCode</h1>
-            <p>Initializing AI Agent...</p>
+            <div class="logo">
+                <div class="logo-icon"><span>&gt;_</span></div>
+                <span class="logo-name">PrivCode</span>
+            </div>
+            <div class="header-status" id="headerStatus">
+                <div class="status-dot pulse" id="statusDot"></div>
+                <span id="statusText">Initializing agent</span>
+            </div>
         </div>
 
+        <!-- Content -->
         <div class="content">
+            <div class="section-label">System Startup</div>
+
             <div class="status-list" id="statusList">
+
+                <!-- Ollama -->
                 <div class="status-item" id="ollama-item">
-                    <div class="status-icon">
-                        <div class="spinner"></div>
+                    <div class="step-icon"><div class="spinner"></div></div>
+                    <div class="step-body">
+                        <div class="step-title">Checking Ollama</div>
+                        <div class="step-sub">Detecting local LLM runtime<span class="dot-pulse"></span></div>
                     </div>
-                    <div class="status-content">
-                        <div class="status-title">Checking Ollama</div>
-                        <div class="status-message">Detecting local LLM runtime<span class="dot-pulse"></span></div>
-                    </div>
+                    <span class="badge badge-pending" id="badge-ollama">WAIT</span>
                 </div>
 
+                <!-- Backend -->
                 <div class="status-item" id="backend-item">
-                    <div class="status-icon">
-                        <div class="spinner"></div>
+                    <div class="step-icon"><div class="spinner"></div></div>
+                    <div class="step-body">
+                        <div class="step-title">Starting FastAPI Backend</div>
+                        <div class="step-sub">Booting AI brain on localhost:8000<span class="dot-pulse"></span></div>
                     </div>
-                    <div class="status-content">
-                        <div class="status-title">Starting FastAPI Backend</div>
-                        <div class="status-message">Booting AI brain<span class="dot-pulse"></span></div>
-                    </div>
+                    <span class="badge badge-pending" id="badge-backend">WAIT</span>
                 </div>
 
+                <!-- Embeddings -->
                 <div class="status-item" id="embeddings-item">
-                    <div class="status-icon">
-                        <div class="spinner"></div>
+                    <div class="step-icon"><div class="spinner"></div></div>
+                    <div class="step-body">
+                        <div class="step-title">Loading Embeddings Model</div>
+                        <div class="step-sub font-mono">BAAI/bge-small-en-v1.5<span class="dot-pulse"></span></div>
                     </div>
-                    <div class="status-content">
-                        <div class="status-title">Loading Embeddings Model</div>
-                        <div class="status-message">BAAI/bge-small-en-v1.5<span class="dot-pulse"></span></div>
-                    </div>
+                    <span class="badge badge-pending" id="badge-embeddings">WAIT</span>
                 </div>
 
+                <!-- LLM -->
                 <div class="status-item" id="llm-item">
-                    <div class="status-icon">
-                        <div class="spinner"></div>
+                    <div class="step-icon"><div class="spinner"></div></div>
+                    <div class="step-body">
+                        <div class="step-title">Loading LLM Model</div>
+                        <div class="step-sub font-mono">Llama-3-8B-Instruct<span class="dot-pulse"></span></div>
                     </div>
-                    <div class="status-content">
-                        <div class="status-title">Loading LLM Model</div>
-                        <div class="status-message">Llama-3-8B<span class="dot-pulse"></span></div>
-                    </div>
+                    <span class="badge badge-pending" id="badge-llm">WAIT</span>
                 </div>
 
+                <!-- Index -->
                 <div class="status-item" id="index-item">
-                    <div class="status-icon">
-                        <div class="spinner"></div>
+                    <div class="step-icon"><div class="spinner"></div></div>
+                    <div class="step-body">
+                        <div class="step-title">Loading Search Index</div>
+                        <div class="step-sub font-mono">FAISS + BM25 (encrypted)<span class="dot-pulse"></span></div>
                     </div>
-                    <div class="status-content">
-                        <div class="status-title">Loading Search Index</div>
-                        <div class="status-message">FAISS + BM25 (encrypted)<span class="dot-pulse"></span></div>
-                    </div>
+                    <span class="badge badge-pending" id="badge-index">WAIT</span>
                 </div>
 
+                <!-- AST -->
                 <div class="status-item" id="ast-item">
-                    <div class="status-icon">
-                        <div class="spinner"></div>
+                    <div class="step-icon"><div class="spinner"></div></div>
+                    <div class="step-body">
+                        <div class="step-title">Initializing AST Parser</div>
+                        <div class="step-sub font-mono">Tree-sitter for code analysis<span class="dot-pulse"></span></div>
                     </div>
-                    <div class="status-content">
-                        <div class="status-title">Initializing AST Parser</div>
-                        <div class="status-message">Tree-sitter for code analysis<span class="dot-pulse"></span></div>
-                    </div>
+                    <span class="badge badge-pending" id="badge-ast">WAIT</span>
+                </div>
+
+            </div>
+
+            <!-- Progress -->
+            <div class="progress-section">
+                <div class="progress-header">
+                    <span class="progress-label">Overall progress</span>
+                    <span class="progress-pct" id="progressPct">0%</span>
+                </div>
+                <div class="progress-track">
+                    <div class="progress-fill" id="progressFill"></div>
                 </div>
             </div>
-
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
-            </div>
         </div>
 
+        <!-- Footer -->
         <div class="footer">
-            <div class="overall-status" id="overallStatus">Initializing...</div>
+            <div class="footer-left" id="overallStatus">
+                <div class="status-dot pulse" id="footerDot"></div>
+                Initializing...
+            </div>
+            <span class="footer-right">v1.0 &middot; air-gapped</span>
         </div>
+
     </div>
 
     <script>
-        const statusItems = {
-            'ollama-item': { title: 'Ollama', completed: false },
-            'backend-item': { title: 'FastAPI Backend', completed: false },
-            'embeddings-item': { title: 'Embeddings', completed: false },
-            'llm-item': { title: 'LLM Model', completed: false },
-            'index-item': { title: 'Search Index', completed: false },
-            'ast-item': { title: 'AST Parser', completed: false },
+        const STEPS = {
+            'ollama-item':     { title: 'Ollama',         done: false },
+            'backend-item':    { title: 'FastAPI Backend', done: false },
+            'embeddings-item': { title: 'Embeddings',     done: false },
+            'llm-item':        { title: 'LLM Model',      done: false },
+            'index-item':      { title: 'Search Index',   done: false },
+            'ast-item':        { title: 'AST Parser',     done: false },
         };
 
-        function markComplete(itemId, message = '') {
+        const BADGE_IDS = {
+            'ollama-item':     'badge-ollama',
+            'backend-item':    'badge-backend',
+            'embeddings-item': 'badge-embeddings',
+            'llm-item':        'badge-llm',
+            'index-item':      'badge-index',
+            'ast-item':        'badge-ast',
+        };
+
+        function markComplete(itemId, message) {
             const item = document.getElementById(itemId);
             if (!item) return;
-
             item.classList.add('completed');
             item.classList.remove('error');
-            
-            const icon = item.querySelector('.status-icon');
-            icon.innerHTML = '<span class="checkmark">✓</span>';
-            
-            const messageEl = item.querySelector('.status-message');
-            if (message) {
-                messageEl.textContent = message;
-                messageEl.classList.add('success');
-            } else {
-                messageEl.classList.remove('dot-pulse');
-            }
-            
-            statusItems[itemId].completed = true;
+
+            // Replace spinner with checkmark SVG
+            item.querySelector('.step-icon').innerHTML =
+                '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13.5 4.5L6.5 11.5L2.5 7.5" stroke="#3fb950" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+            const sub = item.querySelector('.step-sub');
+            sub.textContent = message || 'Done';
+            sub.classList.add('ok');
+
+            const badge = document.getElementById(BADGE_IDS[itemId]);
+            badge.textContent = 'DONE';
+            badge.className = 'badge badge-done';
+
+            STEPS[itemId].done = true;
             updateProgress();
         }
 
-        function markError(itemId, message = '') {
+        function markError(itemId, message) {
             const item = document.getElementById(itemId);
             if (!item) return;
-
             item.classList.add('error');
             item.classList.remove('completed');
-            
-            const icon = item.querySelector('.status-icon');
-            icon.innerHTML = '<span class="error-mark">✕</span>';
-            
-            const messageEl = item.querySelector('.status-message');
-            if (message) {
-                messageEl.textContent = message;
-                messageEl.classList.add('error');
-            }
+
+            item.querySelector('.step-icon').innerHTML =
+                '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 4L4 12M4 4l8 8" stroke="#f85149" stroke-width="2" stroke-linecap="round"/></svg>';
+
+            const sub = item.querySelector('.step-sub');
+            sub.textContent = message || 'Failed';
+            sub.classList.add('err');
+
+            const badge = document.getElementById(BADGE_IDS[itemId]);
+            badge.textContent = 'ERR';
+            badge.className = 'badge badge-error';
         }
 
         function updateProgress() {
-            const completed = Object.values(statusItems).filter(item => item.completed).length;
-            const total = Object.keys(statusItems).length;
-            const percentage = (completed / total) * 100;
-            
-            document.getElementById('progressFill').style.width = percentage + '%';
+            const done  = Object.values(STEPS).filter(s => s.done).length;
+            const total = Object.keys(STEPS).length;
+            const pct   = Math.round((done / total) * 100);
 
-            if (percentage === 100) {
-                document.getElementById('overallStatus').textContent = '✓ Ready';
-                document.getElementById('overallStatus').classList.add('ready');
-                document.querySelector('.header p').textContent = 'AI Agent Ready for Queries';
+            document.getElementById('progressFill').style.width = pct + '%';
+            document.getElementById('progressPct').textContent  = pct + '%';
+
+            if (pct === 100) {
+                // Header
+                document.getElementById('statusText').textContent = 'Agent ready';
+                document.getElementById('statusDot').classList.remove('pulse');
+                document.getElementById('statusDot').classList.add('ready');
+
+                // Footer
+                const overall = document.getElementById('overallStatus');
+                overall.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M13.5 4.5L6.5 11.5L2.5 7.5" stroke="#3fb950" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>&nbsp;All systems ready';
+                overall.classList.add('ready');
+
+                const footerDot = document.getElementById('footerDot');
+                if (footerDot) footerDot.remove();
             }
         }
 
-        // Simulate status updates (in production, poll FastAPI for real status)
+        // Simulated startup sequence — replace with real polling when backend is up
         function simulateInitialization() {
-            setTimeout(() => markComplete('ollama-item', '✓ Ollama detected'), 500);
-            setTimeout(() => markComplete('backend-item', '✓ FastAPI running on localhost:8000'), 2000);
-            setTimeout(() => markComplete('embeddings-item', '✓ SentenceTransformer loaded'), 4000);
-            setTimeout(() => markComplete('llm-item', '✓ Llama-3-8B ready'), 6000);
-            setTimeout(() => markComplete('index-item', '✓ Index decrypted'), 7500);
-            setTimeout(() => markComplete('ast-item', '✓ Tree-sitter active'), 8500);
+            setTimeout(() => markComplete('ollama-item',     'Ollama detected'),                    500);
+            setTimeout(() => markComplete('backend-item',    'FastAPI running on localhost:8000'), 2000);
+            setTimeout(() => markComplete('embeddings-item', 'SentenceTransformer loaded'),        4000);
+            setTimeout(() => markComplete('llm-item',        'Llama-3-8B ready'),                  6000);
+            setTimeout(() => markComplete('index-item',      'Index decrypted & loaded'),          7500);
+            setTimeout(() => markComplete('ast-item',        'Tree-sitter active'),                8500);
         }
 
-        // Start initialization
         simulateInitialization();
 
-        // Optional: Poll FastAPI endpoint for real status
-        // Uncomment this when backend is ready to provide status endpoint
+        // Uncomment to poll the real backend for live status
         /*
         async function pollBackendStatus() {
             try {
-                const response = await fetch('http://localhost:8000/api/status');
-                const status = await response.json();
-                
-                if (status.ollama) markComplete('ollama-item', '✓ Ollama ready');
-                if (status.embeddings) markComplete('embeddings-item', '✓ Embeddings loaded');
-                if (status.llm) markComplete('llm-item', '✓ LLM ready');
-                if (status.index) markComplete('index-item', '✓ Index loaded');
-                if (status.ast) markComplete('ast-item', '✓ AST parser ready');
-            } catch (e) {
-                console.log('Backend not ready yet');
-            }
+                const r = await fetch('http://localhost:8000/api/status');
+                const s = await r.json();
+                if (s.ollama)      markComplete('ollama-item',     'Ollama ready');
+                if (s.backend)     markComplete('backend-item',    'FastAPI running');
+                if (s.embeddings)  markComplete('embeddings-item', 'Embeddings loaded');
+                if (s.llm)         markComplete('llm-item',        'LLM ready');
+                if (s.index)       markComplete('index-item',      'Index loaded');
+                if (s.ast)         markComplete('ast-item',        'AST parser ready');
+            } catch (_) {}
         }
-
-        setInterval(pollBackendStatus, 1000);
+        setInterval(pollBackendStatus, 1200);
         */
     </script>
 </body>

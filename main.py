@@ -20,6 +20,7 @@ Frontend (separate terminal):
     cd frontend && npm run dev
 """
 
+import atexit
 import subprocess
 import sys
 import os
@@ -44,8 +45,8 @@ if str(BACKEND_DIR) not in sys.path:
 os.chdir(BACKEND_DIR)
 
 # ── Imports (available only after path setup) ─────────────────────────
-from core.config import API_HOST, API_PORT, LOG_LEVEL  # noqa: E402
-from core.logger import setup_logger  # noqa: E402
+from backend.core.config import API_HOST, API_PORT, LOG_LEVEL  # noqa: E402
+from backend.core.logger import setup_logger  # noqa: E402
 
 logger = setup_logger()
 
@@ -65,11 +66,16 @@ def start_agent():
         return
 
     try:
+        agent_env = os.environ.copy()
+        agent_env["PRIVCODE_MANAGED_BACKEND"] = "1"
+        agent_env["PRIVCODE_BACKEND_PORT"] = str(API_PORT)
+
         _agent_process = subprocess.Popen(
             [str(AGENT_EXE)],
             cwd=str(AGENT_EXE.parent),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
+            env=agent_env,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
         logger.info("🖥️  Tauri agent started (PID %d)", _agent_process.pid)
@@ -115,13 +121,26 @@ def main():
     logger.info("Health   : http://%s:%s/health", API_HOST, API_PORT)
     logger.info("=" * 60)
 
-    uvicorn.run(
-        "app:app",          # FastAPI app object in backend/app.py
-        host=API_HOST,
-        port=API_PORT,
-        log_level=LOG_LEVEL.lower(),
-        reload=False,       # Set True during development if needed
-    )
+    # Launch tray agent before uvicorn (agent health-checks port 8000
+    # and skips starting its own backend if it's already running)
+    start_agent()
+
+    # Guarantee stop_agent() is called on every exit path:
+    # Ctrl+C, SIGTERM, sys.exit(), or unhandled exception.
+    atexit.register(stop_agent)
+
+    try:
+        uvicorn.run(
+            "app:app",          # FastAPI app object in backend/app.py
+            host=API_HOST,
+            port=API_PORT,
+            log_level=LOG_LEVEL.lower(),
+            reload=False,
+        )
+    finally:
+        # Belt-and-suspenders: kill agent the moment uvicorn returns.
+        # atexit will also fire — stop_agent() is idempotent (safe to call twice).
+        stop_agent()
 
 
 if __name__ == "__main__":

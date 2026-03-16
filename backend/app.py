@@ -132,24 +132,33 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         logger.warning("⚠️ Initial indexing skipped: %s", exc)
 
-    # 6️⃣  Pre-warm local LLM (loads model into memory)
-    try:
-        from services.privcode import get_llm
-        get_llm()
-    except FileNotFoundError as exc:
-        logger.warning("⚠️ LLM model not found — queries will fail until model is placed: %s", exc)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("⚠️ LLM pre-warm failed: %s", exc)
+    # 6️⃣  Pre-warm local LLM in background (non-blocking startup)
+    async def _warmup_llm_background():
+        try:
+            from services.privcode import get_llm
+            logger.info("🧠 Starting LLM warmup in background...")
+            await asyncio.to_thread(get_llm)
+            logger.info("✅ Background LLM warmup complete")
+        except FileNotFoundError as exc:
+            logger.warning("⚠️ LLM model not found — queries will fail until model is placed: %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("⚠️ Background LLM warmup failed: %s", exc)
+
+    llm_warmup_task = asyncio.create_task(_warmup_llm_background())
 
     # 7️⃣  Background git watcher
     watcher_task = asyncio.create_task(_git_watcher())
 
-    # 8️⃣  Launch Tauri agent in the background
+    # 8️⃣  Launch Tauri agent (only if not already started by main.py)
     try:
         import importlib
         main_mod = importlib.import_module("__main__")
         if hasattr(main_mod, "start_agent"):
-            main_mod.start_agent()
+            existing = getattr(main_mod, "_agent_process", None)
+            if existing is None:
+                main_mod.start_agent()
+            else:
+                logger.info("🖥️  Tauri agent already running (PID %s)", getattr(existing, "pid", "unknown"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("⚠️ Could not launch Tauri agent: %s", exc)
 
@@ -162,7 +171,12 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ──
     logger.info("🛑 PrivCode shutting down...")
+    llm_warmup_task.cancel()
     watcher_task.cancel()
+    try:
+        await llm_warmup_task
+    except asyncio.CancelledError:
+        pass
     try:
         await watcher_task
     except asyncio.CancelledError:
