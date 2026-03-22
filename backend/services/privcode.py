@@ -19,36 +19,64 @@ logger = setup_logger()
 
 # Get the project root (2 levels up from backend/services/)
 ROOT_DIR = Path(__file__).resolve().parents[2]
-MODEL_PATH = ROOT_DIR / "models" / "Meta-Llama-3-8B-Instruct-Q4_K_M.gguf"
+
+# Candidate model files in load priority order. You can override with
+# environment variable PRIVCODE_MODEL_PATH to force a specific file.
+MODEL_CANDIDATES = [
+    ROOT_DIR / "models" / "Phi-3-mini-4k-instruct-q4.gguf",
+    ROOT_DIR / "models" / "Meta-Llama-3-8B-Instruct-Q4_K_M.gguf",
+]
 
 # Lazy load LLM only when needed
 llm = None
+
+
+def _resolve_model_candidates() -> List[Path]:
+    forced_model = os.getenv("PRIVCODE_MODEL_PATH", "").strip()
+    if forced_model:
+        return [Path(forced_model).expanduser().resolve()]
+    return MODEL_CANDIDATES
 
 def get_llm():
     """Lazy load the LLM model"""
     global llm
     if llm is None:
-        if not MODEL_PATH.exists():
+        model_candidates = _resolve_model_candidates()
+        existing_candidates = [path for path in model_candidates if path.exists()]
+
+        if not existing_candidates:
             raise FileNotFoundError(
-                f"❌ LLM model not found at: {MODEL_PATH}\n"
-                f"Please download the model and place it in the models/ directory.\n"
-                f"Download from: https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF"
+                "No supported GGUF model file found. Checked:\n"
+                + "\n".join(f"- {path}" for path in model_candidates)
+                + "\n\nPlace a model in models/ or set PRIVCODE_MODEL_PATH to an absolute GGUF path."
             )
-        
-        logger.info("🧠 Loading local LLM from: %s", MODEL_PATH)
 
         # Detect available CPU threads (use all physical cores)
         cpu_threads = os.cpu_count() or 6
 
-        llm = Llama(
-            model_path=str(MODEL_PATH),
-            n_ctx=2048,          # reduced for speed
-            n_threads=cpu_threads,
-            n_batch=512,         # larger batch = faster prompt processing
-            n_gpu_layers=0,      # CPU mode
-            verbose=False,
-        )
-        logger.info("✅ LLM loaded successfully (threads=%d)", cpu_threads)
+        last_error = None
+        for model_path in existing_candidates:
+            try:
+                logger.info("🧠 Loading local LLM from: %s", model_path)
+                llm = Llama(
+                    model_path=str(model_path),
+                    n_ctx=2048,          # reduced for speed
+                    n_threads=cpu_threads,
+                    n_batch=512,         # larger batch = faster prompt processing
+                    n_gpu_layers=0,      # CPU mode
+                    verbose=False,
+                )
+                logger.info("✅ LLM loaded successfully (threads=%d, model=%s)", cpu_threads, model_path.name)
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                logger.warning("⚠️ Failed to load model %s: %s", model_path, exc)
+
+        if llm is None:
+            raise RuntimeError(
+                "Failed to initialize any available GGUF model. "
+                f"Last error: {last_error}"
+            )
     return llm
 
 # -----------------------------------------------------------------------------
@@ -126,6 +154,32 @@ def extract_first_valid_json(text: str) -> Dict:
 
     raise ValueError("No valid JSON object found")
 
+
+def _generate_rag_text(model, prompt: str) -> str:
+    """Generate RAG text with one retry if the first attempt is empty."""
+    response = model(
+        prompt,
+        max_tokens=320,
+        temperature=0.1,
+        top_p=0.9,
+        # Do not stop on markdown fences; some models start with ```json.
+        stop=["\n\n\n"],
+    )
+    raw_text = response["choices"][0]["text"].strip()
+
+    if raw_text:
+        return raw_text
+
+    logger.warning("RAG generation returned empty output; retrying once with relaxed settings")
+    retry_response = model(
+        prompt,
+        max_tokens=512,
+        temperature=0.2,
+        top_p=0.95,
+        stop=["\n\n\n"],
+    )
+    return retry_response["choices"][0]["text"].strip()
+
 # -----------------------------------------------------------------------------
 # Full RAG Pipeline
 # -----------------------------------------------------------------------------
@@ -151,16 +205,7 @@ def rag_query(query: str, top_k: int = 3) -> Dict:
             "contexts": contexts  # Still return the retrieved context
         }
     
-    response = model(
-        prompt,
-        max_tokens=320,
-        temperature=0.1,  # reduces hallucination
-        top_p=0.9,
-        # Avoid stopping on '}' because it can truncate nested JSON.
-        stop=["\n\n\n", "```"],
-    )
-
-    raw_text = response["choices"][0]["text"].strip()
+    raw_text = _generate_rag_text(model, prompt)
 
     try:
         parsed = extract_first_valid_json(raw_text)
@@ -259,15 +304,7 @@ def auto_query(query: str, top_k: int = 3) -> Dict:
             logger.error(str(e))
             return {"error": "LLM model not available", "message": str(e)}
 
-        response = model(
-            prompt,
-            max_tokens=320,
-            temperature=0.1,
-            top_p=0.9,
-            stop=["\n\n\n", "```"],
-        )
-
-        raw_text = response["choices"][0]["text"].strip()
+        raw_text = _generate_rag_text(model, prompt)
 
         try:
             parsed = extract_first_valid_json(raw_text)

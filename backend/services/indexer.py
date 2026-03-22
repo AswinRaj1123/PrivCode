@@ -69,7 +69,7 @@ def index_file(file_path: Path, repo_root: Path):
     try:
         content = file_path.read_text(encoding="utf-8", errors="ignore")
     except Exception as exc:
-        logger.warning("⚠️ Failed to read %s: %s", file_path, exc)
+        logger.warning("Failed to read %s: %s", file_path, exc)
         return
 
     rel_path = file_path.relative_to(repo_root)
@@ -99,7 +99,7 @@ def index_file(file_path: Path, repo_root: Path):
 
         get_index().load([payload], keys=[doc_id])
 
-    logger.info("📄 Indexed %s (%d chunks)", rel_path, len(chunks))
+    logger.info("Indexed %s (%d chunks)", rel_path, len(chunks))
 
 
 # -----------------------------------------------------------------------------
@@ -107,7 +107,7 @@ def index_file(file_path: Path, repo_root: Path):
 # -----------------------------------------------------------------------------
 
 def build_full_index(repo_path: Path):
-    logger.info("🔄 Building full Redis index...")
+    logger.info("Building full Redis index...")
 
     for root, dirs, files in os.walk(repo_path):
         # Skip unwanted directories
@@ -120,7 +120,7 @@ def build_full_index(repo_path: Path):
 
             index_file(file_path, repo_path)
 
-    logger.info("✅ Full indexing completed.")
+    logger.info("Full indexing completed.")
 
 
 # -----------------------------------------------------------------------------
@@ -161,21 +161,21 @@ def resolve_repo_path(path_or_url: str) -> Path:
 
     if dest.exists() and (dest / ".git").is_dir():
         # Already cloned — pull latest changes
-        logger.info("🔄 Pulling latest from %s ...", url)
+        logger.info("Pulling latest from %s ...", url)
         try:
             repo = Repo(str(dest))
             origin = repo.remotes.origin
             origin.pull()
-            logger.info("✅ Pull complete for %s", dest.name)
+            logger.info("Pull complete for %s", dest.name)
         except GitCommandError as exc:
-            logger.warning("⚠️ Pull failed (%s). Using existing clone.", exc)
+            logger.warning("Pull failed (%s). Using existing clone.", exc)
     else:
         # Fresh clone
         if dest.exists():
             shutil.rmtree(dest)          # remove stale non-git dir
-        logger.info("📥 Cloning %s → %s ...", url, dest)
+        logger.info("Cloning %s -> %s ...", url, dest)
         Repo.clone_from(url, str(dest))
-        logger.info("✅ Clone complete: %s", dest.name)
+        logger.info("Clone complete: %s", dest.name)
 
     return dest
 
@@ -192,7 +192,7 @@ def incremental_index(repo_path_or_url):
         repo = Repo(str(repo_path))
         current_commit = repo.head.commit.hexsha
     except Exception as exc:
-        logger.warning("⚠️ Git error (%s). Running full index.", exc)
+        logger.warning("Git error (%s). Running full index.", exc)
         build_full_index(repo_path)
         return
 
@@ -200,14 +200,14 @@ def incremental_index(repo_path_or_url):
     last_commit = metadata.get("last_commit")
 
     if last_commit == current_commit:
-        logger.info("✅ Repository already indexed (no changes).")
+        logger.info("Repository already indexed (no changes).")
         return
 
-    logger.info("🔍 Repository changed — re-indexing...")
+    logger.info("Repository changed - re-indexing...")
     build_full_index(repo_path)
 
     save_metadata(repo_path, {"last_commit": current_commit})
-    logger.info("💾 Updated indexing metadata.")
+    logger.info("Updated indexing metadata.")
 
 
 # -----------------------------------------------------------------------------
