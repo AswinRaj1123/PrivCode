@@ -23,7 +23,6 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 # Candidate model files in load priority order. You can override with
 # environment variable PRIVCODE_MODEL_PATH to force a specific file.
 MODEL_CANDIDATES = [
-    ROOT_DIR / "models" / "Phi-3-mini-4k-instruct-q4.gguf",
     ROOT_DIR / "models" / "Meta-Llama-3-8B-Instruct-Q4_K_M.gguf",
 ]
 

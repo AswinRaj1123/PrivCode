@@ -91,6 +91,29 @@ async def _git_watcher(interval: int = 30):
 # 🔄 LIFESPAN: Startup / Shutdown
 # =========================================================
 
+# Track LLM loading state
+_llm_ready = False
+
+async def _wait_for_llm_ready(timeout_seconds: int = 120) -> bool:
+    """Wait for LLM to finish loading (used by query endpoints)."""
+    global _llm_ready
+    if _llm_ready:
+        return True
+    
+    import time as time_module
+    start = time_module.time()
+    while (time_module.time() - start) < timeout_seconds:
+        try:
+            from services.privcode import llm
+            if llm is not None:
+                _llm_ready = True
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+    
+    return False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize every service in order, then tear down on exit."""
@@ -130,12 +153,14 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         logger.warning("⚠️ Initial indexing skipped: %s", exc)
 
-    # 6️⃣  Pre-warm local LLM in background (non-blocking startup)
+    # 6️⃣  Pre-warm local LLM in background (NON-BLOCKING: fast startup)
     async def _warmup_llm_background():
+        global _llm_ready
         try:
             from services.privcode import get_llm
             logger.info("🧠 Starting LLM warmup in background...")
             await asyncio.to_thread(get_llm)
+            _llm_ready = True
             logger.info("✅ Background LLM warmup complete")
         except FileNotFoundError as exc:
             logger.warning("⚠️ LLM model not found — queries will fail until model is placed: %s", exc)
@@ -359,19 +384,24 @@ def index_repo(
 # 🔎 QUERY ENDPOINT WITH LOGGING
 # =========================================================
 @app.post("/query")
-def query(
+async def query(
     req: QueryRequest,
     current_user: dict = Depends(get_current_user),
 ):
     try:
+        # Ensure LLM is ready (wait if still loading)
+        ready = await _wait_for_llm_ready()
+        if not ready:
+            raise HTTPException(status_code=503, detail="LLM model still loading. Please try again in a moment.")
+        
         # Route by mode
         mode = (req.mode or "auto").lower()
         if mode == "general":
-            response = general_query(req.question)
+            response = await asyncio.to_thread(general_query, req.question)
         elif mode == "repo":
-            response = rag_query(req.question)
+            response = await asyncio.to_thread(rag_query, req.question)
         else:  # "auto" — try RAG first, fall back to general
-            response = auto_query(req.question)
+            response = await asyncio.to_thread(auto_query, req.question)
 
         logger.info(
             "User %s queried (%s): %s",
