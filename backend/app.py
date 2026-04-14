@@ -1,5 +1,3 @@
-"""PrivCode FastAPI entrypoint (Next.js compatible)."""
-
 import asyncio
 import os
 import time
