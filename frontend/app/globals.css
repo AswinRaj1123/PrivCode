@@ -6,6 +6,7 @@
 /* Flat, developer-centric, no gradients. Inspired by VS Code / Linear / GitHub. */
 
 :root {
+  /* Default: dark theme */
   --bg-primary: #0d1117;
   --bg-secondary: #161b22;
   --bg-tertiary: #1c2128;
@@ -23,6 +24,59 @@
   --warning: #d29922;
   --danger: #f85149;
   --danger-muted: rgba(248, 81, 73, 0.15);
+
+  /* RGB triplets for Tailwind color opacity support */
+  --pc-bg: 13 17 23;
+  --pc-surface: 22 27 34;
+  --pc-raised: 28 33 40;
+  --pc-elevated: 33 38 45;
+  --pc-hover: 41 46 54;
+  --pc-border: 48 54 61;
+  --pc-border-muted: 33 38 45;
+  --pc-text: 230 237 243;
+  --pc-secondary: 139 148 158;
+  --pc-muted: 110 118 129;
+  --pc-accent: 88 166 255;
+  --pc-accent-hover: 121 192 255;
+  --pc-success: 63 185 80;
+  --pc-warning: 210 153 34;
+  --pc-danger: 248 81 73;
+}
+
+:root.light {
+  --bg-primary: #f7f9fc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+  --bg-elevated: #eef2f7;
+  --bg-hover: #e2e8f0;
+  --border-default: #cbd5e1;
+  --border-muted: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-muted: rgba(37, 99, 235, 0.14);
+  --success: #16a34a;
+  --warning: #ca8a04;
+  --danger: #dc2626;
+  --danger-muted: rgba(220, 38, 38, 0.14);
+
+  --pc-bg: 247 249 252;
+  --pc-surface: 255 255 255;
+  --pc-raised: 241 245 249;
+  --pc-elevated: 238 242 247;
+  --pc-hover: 226 232 240;
+  --pc-border: 203 213 225;
+  --pc-border-muted: 226 232 240;
+  --pc-text: 15 23 42;
+  --pc-secondary: 51 65 85;
+  --pc-muted: 100 116 139;
+  --pc-accent: 37 99 235;
+  --pc-accent-hover: 29 78 216;
+  --pc-success: 22 163 74;
+  --pc-warning: 202 138 4;
+  --pc-danger: 220 38 38;
 }
 
 * {

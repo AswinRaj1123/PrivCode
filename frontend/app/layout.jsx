@@ -1,4 +1,5 @@
 import "./globals.css";
+import ThemeToggle from "@/components/theme-toggle";
 
 export const metadata = {
   title: "PrivCode - Private Code Intelligence",
@@ -17,6 +18,7 @@ export default function RootLayout({ children }) {
         />
       </head>
       <body className="antialiased bg-pc-bg text-pc-text" style={{ fontFamily: "'Inter', sans-serif" }}>
+        <ThemeToggle />
         {children}
       </body>
     </html>

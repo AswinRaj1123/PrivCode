@@ -42,7 +42,7 @@ function CodeBlock({ code, language }) {
   };
 
   return (
-    <div className="my-3 rounded-lg overflow-hidden border border-pc-border bg-[#0d1117]">
+    <div className="my-3 rounded-lg overflow-hidden border border-pc-border bg-pc-bg">
       {/* Header bar */}
       <div className="flex items-center justify-between px-4 py-2 bg-pc-elevated border-b border-pc-border">
         <span className="text-[11px] font-mono text-pc-muted uppercase tracking-wide">
